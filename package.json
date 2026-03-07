@@ -1,0 +1,23 @@
+{
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "name": "web.api",
+  "version": "1.0.0",
+  "description": "this is a hobby server application",
+  "main": "index.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JohnWesley2112/web.api.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/JohnWesley2112/web.api/issues"
+  },
+  "homepage": "https://github.com/JohnWesley2112/web.api#readme"
+}
