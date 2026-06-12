@@ -1,23 +1,53 @@
 {
-  "dependencies": {
-    "express": "^5.2.1"
-  },
-  "name": "web.api",
-  "version": "1.0.0",
-  "description": "this is a hobby server application",
-  "main": "index.js",
-  "devDependencies": {},
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/JohnWesley2112/web.api.git"
-  },
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/JohnWesley2112/web.api/issues"
-  },
-  "homepage": "https://github.com/JohnWesley2112/web.api#readme"
+    "name": "web.api",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "this is a hobby server application",
+    "main": "dist/server.js",
+    "author": "",
+    "license": "ISC",
+    "scripts": {
+        "predev": "npx prisma generate",
+        "dev": "nodemon --exec tsx src/server.ts",
+        "prebuild": "npx prisma generate",
+        "build": "tsc",
+        "prestart": "npm run build",
+        "start": "node dist/server.js"
+    },
+    "dependencies": {
+        "@prisma/client": "^6.19.3",
+        "bcrypt": "^6.0.0",
+        "cookie-parser": "^1.4.7",
+        "cors": "^2.8.6",
+        "crypto": "^1.0.1",
+        "dotenv": "^17.4.2",
+        "express": "^5.2.1",
+        "jsonwebtoken": "^9.0.3",
+        "loggerverse": "^1.0.15",
+        "pg": "^8.11.1",
+        "prisma": "^6.19.3",
+        "swagger-jsdoc": "^6.3.0",
+        "swagger-ui-express": "^5.0.1"
+    },
+    "devDependencies": {
+        "@types/bcrypt": "^6.0.0",
+        "@types/cookie-parser": "^1.4.10",
+        "@types/cors": "^2.8.19",
+        "@types/express": "^5.0.6",
+        "@types/jsonwebtoken": "^9.0.10",
+        "@types/node": "^25.7.0",
+        "@types/swagger-jsdoc": "^6.0.4",
+        "@types/swagger-ui-express": "^4.1.8",
+        "nodemon": "^3.1.14",
+        "tsx": "^4.22.4",
+        "typescript": "^6.0.3"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/JohnWesley2112/web.api.git"
+    },
+    "bugs": {
+        "url": "https://github.com/JohnWesley2112/web.api/issues"
+    },
+    "homepage": "https://github.com/JohnWesley2112/web.api#readme"
 }
