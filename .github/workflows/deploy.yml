@@ -27,6 +27,13 @@ jobs:
               env:
                   DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+            - name: Verify Build Output
+              run: |
+                  pwd
+                  ls -la
+                  ls -la dist
+                  ls -la prisma
+
             - name: Upload Files to DigitalOcean Droplet
               uses: appleboy/scp-action@v0.1.7
               with:
@@ -34,11 +41,7 @@ jobs:
                   username: root
                   key: ${{secrets.SSH_PRIVATE_KEY}}
                   port: 22
-                  source: |
-                      dist/**
-                      prisma/**
-                      package.json
-                      package-lock.json
+                  source: "dist/**,prisma/**,package.json,package-lock.json"
                   target: "/root/api.erp"
                   overwrite: true
 
