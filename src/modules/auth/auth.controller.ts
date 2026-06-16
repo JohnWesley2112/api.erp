@@ -1,5 +1,4 @@
 import { AppError } from "../../errors/app.error.js";
-import logger from "../../logs/Logger.js";
 import type {
     AppRequest,
     AppResponse,
