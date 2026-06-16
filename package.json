@@ -1,17 +1,16 @@
 {
-    "name": "web.api",
+    "name": "api.erp",
     "version": "1.0.0",
     "type": "module",
-    "description": "this is a hobby server application",
+    "description": "this is a hobby erp server application",
     "main": "dist/server.js",
-    "author": "",
+    "author": "John Wesley",
     "license": "ISC",
     "scripts": {
         "predev": "npx prisma generate",
         "dev": "nodemon --exec tsx src/server.ts",
         "prebuild": "npx prisma generate",
         "build": "tsc",
-        "prestart": "npm run build",
         "start": "node dist/server.js"
     },
     "dependencies": {
@@ -24,12 +23,11 @@
         "express": "^5.2.1",
         "jsonwebtoken": "^9.0.3",
         "loggerverse": "^1.0.15",
-        "pg": "^8.11.1",
-        "prisma": "^6.19.3",
         "swagger-jsdoc": "^6.3.0",
         "swagger-ui-express": "^5.0.1"
     },
     "devDependencies": {
+        "prisma": "^6.19.3",
         "@types/bcrypt": "^6.0.0",
         "@types/cookie-parser": "^1.4.10",
         "@types/cors": "^2.8.19",

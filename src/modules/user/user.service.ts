@@ -13,24 +13,24 @@ export class UserService {
         }
     }
 
-    async create(data: { email: string; name: string }) {
-        try {
-            return await prisma.users.create({ data });
-        } catch (error) {
-            mapPrismaError(error);
-        }
-    }
+    // async create(data: { email: string; name: string }) {
+    //     try {
+    //         return await prisma.users.create({ data });
+    //     } catch (error) {
+    //         mapPrismaError(error);
+    //     }
+    // }
 
-    async update(
-        user_id: number,
-        data: Partial<{ email: string; name: string }>,
-    ) {
-        try {
-            return await prisma.users.update({ where: { user_id }, data });
-        } catch (error) {
-            mapPrismaError(error);
-        }
-    }
+    // async update(
+    //     user_id: number,
+    //     data: Partial<{ email: string; name: string }>,
+    // ) {
+    //     try {
+    //         return await prisma.users.update({ where: { user_id }, data });
+    //     } catch (error) {
+    //         mapPrismaError(error);
+    //     }
+    // }
 
     async delete(user_id: number) {
         try {

@@ -1,0 +1,57 @@
+name: Deploy Pord Build to DigitalOcean Droplet
+
+on:
+    push:
+        branches:
+            - main
+
+jobs:
+    build-and-deploy-nodejs:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v4
+
+            - name: Setup Up Node.Js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: npm
+
+            - name: Install Dependencies
+              run: npm ci
+
+            - name: Build Application
+              run: npm run build
+
+            - name: Upload Files to DigitalOcean Droplet
+              uses: appleboy/scp-action@v0.1.7
+              with:
+                  host: ${{secrets.DROPLET_IP}}
+                  username: root
+                  key: ${{secrets.SSH_PRIVATE_KEY}}
+                  port: 22
+                  source: |
+                      dist/**
+                      prisma/**
+                      package.json
+                      package-lock.json
+                  target: "/root/api.erp"
+                  overwrite: true
+
+            - name: Install Production Dependencies and Restart API
+              uses: appleboy/ssh-action@v1.0.3
+              with:
+                  host: ${{secrets.DROPLET_IP}}
+                  username: root
+                  key: ${{secrets.SSH_PRIVATE_KEY}}
+                  port: 22
+                  script: |
+                      cd /root/api.erp
+                      npm ci --omit=dev
+                      pm2 restart api-erp || pm2 start dist/server.js --name api-erp
+                      pm2 save
+
+            - name: Deployment Complete
+              run: echo "Deployment completed successfully"
