@@ -53,6 +53,13 @@ jobs:
                   key: ${{secrets.SSH_PRIVATE_KEY}}
                   port: 22
                   script: |
+                      export NVM_DIR="$HOME/.nvm"
+                      . "$NVM_DIR/nvm.sh"
+
+                      node -v
+                      npm -v
+                      pm2 -v
+
                       cd /root/api.erp
                       npm ci --omit=dev
                       pm2 restart api-erp || pm2 start dist/server.js --name api-erp
