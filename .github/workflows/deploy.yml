@@ -24,6 +24,8 @@ jobs:
 
             - name: Build Application
               run: npm run build
+              env:
+                  DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
             - name: Upload Files to DigitalOcean Droplet
               uses: appleboy/scp-action@v0.1.7
