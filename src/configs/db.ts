@@ -1,5 +1,5 @@
 // src/config/db.ts
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import logger from "../logs/Logger.js";
 
 const prisma = new PrismaClient({
@@ -12,24 +12,24 @@ const prisma = new PrismaClient({
 });
 
 // Log slow queries
-prisma.$on("query", (e) => {
+prisma.$on("query", (e: Prisma.QueryEvent) => {
     if (e.duration > 200) {
         logger.warn(`Slow query (${e.duration}ms): ${e.query}`);
     }
 });
 
 // Log warnings
-prisma.$on("warn", (e) => {
+prisma.$on("warn", (e: Prisma.LogEvent) => {
     logger.warn(e.message);
 });
 
 // Log errors (optional – your error handler already catches Prisma errors)
-prisma.$on("error", (e) => {
+prisma.$on("error", (e: Prisma.LogEvent) => {
     logger.error(e.message);
 });
 
 // Log info (optional)
-prisma.$on("info", (e) => {
+prisma.$on("info", (e: Prisma.LogEvent) => {
     logger.info(e.message);
 });
 
