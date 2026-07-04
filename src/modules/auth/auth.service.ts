@@ -8,10 +8,10 @@ import { generateAccessToken } from "../../helpers/jwt-helper.js";
 export class AuthService {
     async login(userEmail: string, password: string) {
         try {
-            const user = await prisma.users.findUnique({
-                where: { user_email: userEmail },
+            const user = await prisma.user.findUnique({
+                where: { userEmail: userEmail },
                 include: {
-                    roles: true,
+                    assignedRoles: true,
                 },
             });
 
@@ -19,13 +19,13 @@ export class AuthService {
                 throw new AppError("Invalid email or password", 401);
             }
 
-            if (!user.hsd_pwd) {
+            if (!user.password) {
                 throw new AppError("User password is not configured", 500);
             }
 
             const isValidUser = await AuthService.verifyPassword(
                 password,
-                user.hsd_pwd,
+                user.password,
             );
 
             if (!isValidUser) {
@@ -33,9 +33,9 @@ export class AuthService {
             }
 
             const token = generateAccessToken(
-                user.user_id,
-                user.user_email!,
-                user.roles?.role_name || "guest",
+                user.id,
+                user.userEmail!,
+                user.assignedRoles?.[0]?.roleName || "guest",
             );
 
             return AuthMapper.toResponse(user, token);

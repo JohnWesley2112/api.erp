@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { IamController } from "./iam.controller";
+import { IamController } from "./iam.controller.js";
 
 const router = Router();
 const iamController = new IamController();

@@ -5,7 +5,10 @@ import { mapPrismaError } from "../../utils/prisma.error-mapper.js";
 export class UserService {
     async findById(user_id: number) {
         try {
-            const user = await prisma.users.findUnique({ where: { user_id } });
+            const user = await prisma.user.findUnique({
+                where: { id: user_id },
+            });
+            // User.findUnique({ where: { user_id } });
             if (!user) throw new AppError("User not found", 404);
             return user;
         } catch (error) {
@@ -15,7 +18,7 @@ export class UserService {
 
     // async create(data: { email: string; name: string }) {
     //     try {
-    //         return await prisma.users.create({ data });
+    //         return await prisma.User.create({ data });
     //     } catch (error) {
     //         mapPrismaError(error);
     //     }
@@ -26,7 +29,7 @@ export class UserService {
     //     data: Partial<{ email: string; name: string }>,
     // ) {
     //     try {
-    //         return await prisma.users.update({ where: { user_id }, data });
+    //         return await prisma.User.update({ where: { user_id }, data });
     //     } catch (error) {
     //         mapPrismaError(error);
     //     }
@@ -34,7 +37,7 @@ export class UserService {
 
     async delete(user_id: number) {
         try {
-            await prisma.users.delete({ where: { user_id } });
+            await prisma.user.delete({ where: { id: user_id } });
         } catch (error) {
             mapPrismaError(error);
         }
@@ -42,7 +45,7 @@ export class UserService {
 
     async findAll() {
         try {
-            return await prisma.users.findMany();
+            return await prisma.user.findMany();
         } catch (error) {
             mapPrismaError(error);
         }

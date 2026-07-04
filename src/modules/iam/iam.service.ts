@@ -1,5 +1,5 @@
-import prisma from "../../configs/db";
-import { mapPrismaError } from "../../utils/prisma.error-mapper";
+import prisma from "../../configs/db.js";
+import { mapPrismaError } from "../../utils/prisma.error-mapper.js";
 
 export class IamService {
     async roles() {

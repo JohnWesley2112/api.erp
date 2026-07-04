@@ -1,11 +1,11 @@
-import type { users } from "@prisma/client";
+import type { User } from "@prisma/client";
 
 /**
  * Expected shape of the incoming request body for logging in
  */
 export interface LoginCredentials {
-  email: users["user_email"]; // Borrows the exact type (string) from Prisma
-  password: users["hsd_pwd"]; // Borrows the exact type (string) from Prisma
+    email: User["userEmail"]; // Borrows the exact type (string) from Prisma
+    password: User["password"]; // Borrows the exact type (string) from Prisma
 }
 
 /**
@@ -13,20 +13,20 @@ export interface LoginCredentials {
  * Omit<users, 'password'> creates a new type that includes
  * every field from the users model EXCEPT the sensitive password hash.
  */
-export type SafeUser = Omit<users, "password">;
+export type SafeUser = Omit<User, "password">;
 
 /**
  * The expected return payload from the authService layer
  */
 export interface AuthResult {
-  user: SafeUser;
-  token: string;
+    user: SafeUser;
+    token: string;
 }
 
 /**
  * Optional: The payload structure encoded inside your JWT
  */
 export interface JWTPayload {
-  userId: users["user_id"];
-  email: users["user_email"];
+    userId: User["id"];
+    email: User["userEmail"];
 }
