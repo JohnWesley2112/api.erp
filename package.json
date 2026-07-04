@@ -15,6 +15,7 @@
     },
     "dependencies": {
         "@prisma/client": "^6.19.3",
+        "prisma": "^6.19.3",
         "bcrypt": "^6.0.0",
         "cookie-parser": "^1.4.7",
         "cors": "^2.8.6",
@@ -27,7 +28,6 @@
         "swagger-ui-express": "^5.0.1"
     },
     "devDependencies": {
-        "prisma": "^6.19.3",
         "@types/bcrypt": "^6.0.0",
         "@types/cookie-parser": "^1.4.10",
         "@types/cors": "^2.8.19",

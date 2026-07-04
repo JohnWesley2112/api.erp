@@ -1,0 +1,47 @@
+model User {
+    id        Int      @id @default(autoincrement()) @map("user_id")
+    firstname String   @db.VarChar(50)
+    lastname  String   @db.VarChar(50)
+    userEmail String   @map("user_email") @db.VarChar(100)
+    password  String   @db.VarChar(200)
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+    assignedRoles Role[]
+
+    @@unique([userEmail])
+    @@index([userEmail])
+    @@map("users")
+}
+
+model Role {
+    id        Int      @id @default(autoincrement()) @map("role_id")
+    roleName  String   @unique @map("role_name") @db.VarChar(100)
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+    users              User[]
+    grantedPermissions Permission[]
+
+    @@map("roles")
+}
+
+model Permission {
+    id             Int    @id @default(autoincrement()) @map("permission_id")
+    permissionName String @unique @map("permission_name") @db.VarChar(100) // e.g., "students", "fees", "attendance"
+
+    // CRUD Matrix Flags
+    canRead       Boolean  @default(false) @map("can_read")
+    canAdd        Boolean  @default(false) @map("can_add")
+    canEdit       Boolean  @default(false) @map("can_edit")
+    canDelete     Boolean  @default(false) @map("can_delete")
+    isRestricted  Boolean  @default(false) @map("is_restricted")
+    isExceptional Boolean  @default(false) @map("is_exceptional")
+
+    createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+    owningRoles Role[]
+
+    @@map("permissions")
+}

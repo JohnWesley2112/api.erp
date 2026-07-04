@@ -2,6 +2,7 @@
 import app from "./app.js";
 import userRoutes from "./modules/user/user.routes.js";
 import authRoutes from "./modules/auth/auth.routes.js";
+import iamRoutes from "./modules/iam/iam.routes.js";
 import { errorHandler } from "./errors/error.handler.js"; // ✅ central error handler
 // import { authenticate } from "./middlewares/auth.middleware.js";
 
@@ -9,6 +10,8 @@ import { errorHandler } from "./errors/error.handler.js"; // ✅ central error h
 app.get("/", (req, res) => {
     res.send("Hello");
 });
+
+app.use("/api/v1/iam", iamRoutes);
 
 // Register routes before error handler
 app.use("/api/v1/auth", authRoutes);
