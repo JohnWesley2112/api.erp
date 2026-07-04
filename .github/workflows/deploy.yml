@@ -46,7 +46,7 @@ jobs:
                   username: root
                   key: ${{secrets.SSH_PRIVATE_KEY}}
                   port: 22
-                  source: "dist/**,prisma/**,package.json,package-lock.json"
+                  source: "dist/**,prisma/**,prisma.config.ts,package.json,package-lock.json"
                   target: "/root/api.erp"
                   overwrite: true
 
