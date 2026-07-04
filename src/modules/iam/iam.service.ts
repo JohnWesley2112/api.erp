@@ -1,17 +1,21 @@
+// src/modules/iam/iam.service.ts
 import prisma from "../../configs/db.js";
 import { mapPrismaError } from "../../utils/prisma.error-mapper.js";
 
 export class IamService {
-    async roles() {
+    /**
+     * Fetches all roles from the database safely
+     */
+    async getAllRoles() {
         try {
-            const roles = await prisma.role.findMany({
+            return await prisma.role.findMany({
                 select: {
                     id: true,
                     roleName: true,
                 },
             });
-            return roles;
         } catch (error) {
+            // mapPrismaError throws AppError or rethrows, fulfilling execution halt
             mapPrismaError(error);
         }
     }
