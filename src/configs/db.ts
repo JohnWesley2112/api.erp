@@ -1,5 +1,5 @@
 // src/config/db.ts
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient, Prisma } from "../../node_modules/.prisma/tenant-client/index.js";
 import logger from "../logs/Logger.js";
 
 const prisma = new PrismaClient({

@@ -1,0 +1,710 @@
+================================================================================
+ERROR HANDLING IMPLEMENTATION ANALYSIS
+ERP API - Complete Architecture & Flow Documentation
+================================================================================
+
+---
+1. CUSTOM ERROR CLASS
+---
+File: src/errors/app.error.ts
+
+Purpose: Defines a custom AppError class that extends JavaScript's native Error class.
+
+Implementation:
+- Extends the native Error class
+- Adds a statusCode property (HTTP status code for the response)
+- Adds an isOperational property (defaults to true - indicates whether the error is expected vs. programming error)
+- Captures stack trace for debugging
+
+Code:
+```typescript
+export class AppError extends Error {
+    public readonly statusCode: number;
+    public readonly isOperational: boolean;
+
+    constructor(message: string, statusCode: number, isOperational = true) {
+        super(message);
+        this.statusCode = statusCode;
+        this.isOperational = isOperational;
+        Error.captureStackTrace(this, this.constructor);
+    }
+}
+```
+
+All operational errors in your app are thrown as instances of this class with an appropriate HTTP status code.
+
+---
+2. GLOBAL ERROR HANDLING MIDDLEWARE
+---
+File: src/errors/error.handler.ts
+
+Purpose: Central middleware that catches and processes ALL errors from the entire application.
+
+How it works:
+1. Logs the error using the logger (with stack trace, URL, method, IP, and userId if available)
+2. Checks error type in this order:
+   - Prisma errors (Prisma.PrismaClientKnownRequestError): Maps specific Prisma error codes to HTTP responses
+     * P2002 → 409 (Unique constraint violation)
+     * P2025 → 404 (Record not found)
+     * Others → 400 (Bad request)
+   - AppError instances: Returns the status code and message defined in the error
+   - Unknown errors: Returns 500 (Internal server error) as a fallback
+3. Sends HTTP response with appropriate status code and error JSON
+
+Code:
+```typescript
+// errors/errorHandler.ts
+import { Prisma } from "@prisma/client";
+import { AppError } from "./app.error.js";
+import type {
+    AppNextFunction,
+    AppRequest,
+    AppResponse,
+} from "../types/express.js";
+import logger from "../logs/Logger.js";
+
+export function errorHandler(
+    err: Error,
+    req: AppRequest,
+    res: AppResponse,
+    next: AppNextFunction,
+) {
+    // Log with your configured Loggerverse (dashboard + file)
+    logger.error(err.message || "An unknown error occurred", {
+        stack: err.stack,
+        url: req.originalUrl,
+        method: req.method,
+        ip: req.ip,
+        userId: (req as any).user?.id,
+    });
+
+    // Prisma known errors
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+        switch (err.code) {
+            case "P2002":
+                return res.status(409).json({
+                    error: `Unique constraint failed on: ${err.meta?.target}`,
+                });
+            case "P2025":
+                return res.status(404).json({ error: "Record not found" });
+            default:
+                return res.status(400).json({ error: err.message });
+        }
+    }
+
+    // Custom operational errors
+    if (err instanceof AppError) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
+
+    // Everything else (programming errors, unknown)
+    res.status(500).json({ error: "Internal server error" });
+}
+```
+
+---
+3. PRISMA ERROR MAPPER
+---
+File: src/utils/prisma.error-mapper.ts
+
+Purpose: Converts database errors into AppError instances before they reach the error handler.
+
+How it works:
+- Catches Prisma errors in services
+- Translates specific Prisma error codes to user-friendly messages and HTTP status codes:
+  * P2002 → "Unique constraint failed" (409)
+  * P2025 → "Record not found" (404)
+  * Other errors → "Database error" (400)
+- Throws new AppError instances with appropriate status codes
+- Unknown errors are rethrown as-is (will be caught by the central error handler)
+
+Code:
+```typescript
+import { Prisma } from "@prisma/client";
+import { AppError } from "../errors/app.error.js";
+
+export function mapPrismaError(error: unknown): never {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    switch (error.code) {
+      case "P2002":
+        throw new AppError(
+          `Unique constraint failed on: ${error.meta?.target}`,
+          409,
+        );
+      case "P2025":
+        throw new AppError("Record not found", 404);
+      default:
+        throw new AppError(`Database error: ${error.message}`, 400);
+    }
+  }
+  throw error; // rethrow unknown (will be caught by central handler)
+}
+```
+
+---
+4. LOGGER
+---
+File: src/logs/Logger.ts
+
+Purpose: Configures error and event logging using the loggerverse library.
+
+Features:
+- Logs to file (JSON format, daily rotation in ./logs/ folder)
+- Provides a dashboard accessible at /admin/logs with authentication
+- Shows live system metrics (RAM, CPU, Disk)
+
+The error handler calls logger.error() with context information (stack trace, URL, method, IP, userId).
+
+Code:
+```typescript
+import { createLogger, FileTransport } from "loggerverse";
+
+const logger = createLogger({
+    dashboard: {
+        enabled: true,
+        path: "/admin/logs", // The URL endpoint where dashboard will live
+        showMetrics: true, // Shows live Droplet RAM, CPU, and Disk metrics!
+        users: [
+            {
+                username: "admin",
+                password: "12345",
+                role: "admin",
+            },
+        ],
+    },
+    transports: [
+        // This saves logs to standard text files on the storage
+        new FileTransport({
+            logFolder: "./logs",
+            filename: "app",
+            format: "json",
+            datePattern: "DD-MM-YYYY",
+        }),
+    ],
+});
+
+export default logger;
+```
+
+---
+5. ERROR THROWING FLOW
+---
+
+IN CONTROLLERS (src/modules/auth/auth.controller.ts, src/modules/user/user.controller.ts)
+
+Controllers wrap their logic in try-catch blocks:
+- try block: Calls service methods and validates input
+- catch block: Uses next(error) to pass errors to the error handler middleware
+- Validation: Throws AppError for invalid input (e.g., missing required fields, invalid user ID)
+
+Code Example - Auth Controller:
+```typescript
+import { AppError } from "../../errors/app.error.js";
+import type {
+    AppRequest,
+    AppResponse,
+    AppNextFunction,
+} from "../../types/express.js";
+import { AuthService } from "./auth.service.js";
+
+const authService = new AuthService();
+
+export class AuthController {
+    // User Login
+    async userLogin(req: AppRequest, res: AppResponse, next: AppNextFunction) {
+        try {
+            const { userEmail, password } = req.body;
+
+            if (!userEmail || !password) {
+                throw new AppError("Email and password are required", 400);
+            }
+
+            const userLoggedIn = await authService.login(userEmail, password);
+            return res.json(userLoggedIn);
+        } catch (error) {
+            next(error);  // ← Passes error to error handler middleware
+        }
+    }
+}
+```
+
+Code Example - User Controller:
+```typescript
+import logger from "../../logs/Logger.js";
+import type {
+    AppRequest,
+    AppResponse,
+    AppNextFunction,
+} from "../../types/express.js";
+import { UserService } from "./user.service.js";
+
+const userService = new UserService();
+
+export class UserController {
+    async getUser(req: AppRequest, res: AppResponse, next: AppNextFunction) {
+        try {
+            const idParam = Array.isArray(req.params.id)
+                ? req.params.id[0]
+                : req.params.id;
+            const userId = Number(idParam);
+
+            if (!idParam || Number.isNaN(userId)) {
+                return res.status(400).json({ error: "Invalid user id" });
+            }
+
+            const user = await userService.findById(userId);
+            res.json(user);
+        } catch (error) {
+            next(error); // ✅ all errors go to your errorHandler
+        }
+    }
+
+    async getAllUsers(
+        req: AppRequest,
+        res: AppResponse,
+        next: AppNextFunction,
+    ) {
+        try {
+            const users = await userService.findAll();
+            logger.info("Fetching users list", { ip: req.ip });
+            res.json(users);
+        } catch (error) {
+            next(error);
+        }
+    }
+}
+```
+
+IN SERVICES (src/modules/auth/auth.service.ts, src/modules/user/user.service.ts)
+
+Services wrap Prisma calls in try-catch blocks:
+- try block: Executes Prisma queries
+- catch block: Calls mapPrismaError(error) to convert database errors to AppError
+
+Code Example - Auth Service:
+```typescript
+import bcrypt from "bcrypt";
+import prisma from "../../configs/db.js";
+import { AppError } from "../../errors/app.error.js";
+import { mapPrismaError } from "../../utils/prisma.error-mapper.js";
+import { AuthMapper } from "./auth.mapper.js";
+import { generateAccessToken } from "../../helpers/jwt-helper.js";
+
+export class AuthService {
+    async login(userEmail: string, password: string) {
+        try {
+            const user = await prisma.users.findUnique({
+                where: { user_email: userEmail },
+                include: {
+                    roles: true,
+                },
+            });
+
+            if (!user) {
+                throw new AppError("Invalid email or password", 401);
+            }
+
+            if (!user.hsd_pwd) {
+                throw new AppError("User password is not configured", 500);
+            }
+
+            const isValidUser = await AuthService.verifyPassword(
+                password,
+                user.hsd_pwd,
+            );
+
+            if (!isValidUser) {
+                throw new AppError("Invalid email or password", 401);
+            }
+
+            const token = generateAccessToken(
+                user.user_id,
+                user.user_email!,
+                user.roles?.role_name || "guest",
+            );
+
+            return AuthMapper.toResponse(user, token);
+        } catch (error) {
+            mapPrismaError(error);  // ← Converts Prisma errors to AppError
+        }
+    }
+
+    static async verifyPassword(
+        plainPassword: string,
+        hashedPassword: string,
+    ): Promise<boolean> {
+        return bcrypt.compare(plainPassword, hashedPassword);
+    }
+}
+```
+
+Code Example - User Service:
+```typescript
+import prisma from "../../configs/db.js";
+import { AppError } from "../../errors/app.error.js";
+import { mapPrismaError } from "../../utils/prisma.error-mapper.js";
+
+export class UserService {
+    async findById(user_id: number) {
+        try {
+            const user = await prisma.users.findUnique({ where: { user_id } });
+            if (!user) throw new AppError("User not found", 404);
+            return user;
+        } catch (error) {
+            mapPrismaError(error);
+        }
+    }
+
+    async delete(user_id: number) {
+        try {
+            await prisma.users.delete({ where: { user_id } });
+        } catch (error) {
+            mapPrismaError(error);
+        }
+    }
+
+    async findAll() {
+        try {
+            return await prisma.users.findMany();
+        } catch (error) {
+            mapPrismaError(error);
+        }
+    }
+}
+```
+
+---
+6. AUTHENTICATION/JWT ERROR HANDLING
+---
+File: src/middlewares/auth.middleware.ts
+
+How it works:
+- Middleware extracts the JWT token from the Authorization header (expects Bearer <token> format)
+- Calls verifyToken() from src/helpers/jwt-helper.ts which uses jwt.verify()
+- If token is missing, invalid, or expired, jwt.verify() throws an error
+- The middleware catches any error and creates an AppError("Invalid or expired token", 401)
+- Passes it to next() which forwards to the error handler
+
+Code:
+```typescript
+import { AppError } from "../errors/app.error.js";
+import type {
+    AppRequest,
+    AppResponse,
+    AppNextFunction,
+} from "../types/express.js";
+import { verifyToken } from "../helpers/jwt-helper.js";
+
+export const authenticate = (
+    req: AppRequest,
+    res: AppResponse,
+    next: AppNextFunction,
+) => {
+    try {
+        const authHeader = req.headers.authorization;
+
+        if (!authHeader?.startsWith("Bearer ")) {
+            throw new AppError("Access token is required", 401);
+        }
+
+        const token = authHeader.split(" ")[1];
+
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+            throw new AppError("Secret token is not configured", 500);
+        }
+
+        const decoded = verifyToken(token!);  // ← Throws if invalid/expired
+        console.log(decoded);
+        
+        (req as any).user = {
+            userId: decoded.userId,
+            email: decoded.email,
+            role: decoded.role,
+        };
+
+        next();
+    } catch (error) {
+        next(new AppError("Invalid or expired token", 401));  // ← All errors become this
+    }
+};
+```
+
+JWT Helper (src/helpers/jwt-helper.ts):
+```typescript
+import jwt from "jsonwebtoken";
+import type { IJwtPayload } from "../middlewares/middleware.types.js";
+const jwtSecret = process.env.JWT_SECRET!;
+
+export const generateAccessToken = (
+    userId: number,
+    email: string,
+    role: string,
+) => {
+    return jwt.sign({ userId, email, role }, jwtSecret, {
+        expiresIn: "1d",
+    });
+};
+
+export const generateRefreshToken = (userId: number) => {
+    return jwt.sign({ userId }, jwtSecret, {
+        expiresIn: "7d",
+    });
+};
+
+export const verifyToken = (token: string): IJwtPayload => {
+    return jwt.verify(token, jwtSecret) as IJwtPayload;
+};
+```
+
+---
+7. VALIDATION ERROR HANDLING
+---
+
+Validation is performed at multiple layers:
+
+1. CONTROLLER LEVEL: Basic presence checks before calling service
+```typescript
+if (!userEmail || !password) {
+    throw new AppError("Email and password are required", 400);
+}
+```
+
+2. SERVICE LEVEL: Business logic validation (e.g., user doesn't exist)
+```typescript
+if (!user) throw new AppError("Invalid email or password", 401);
+```
+
+3. DATABASE LEVEL: Constraints detected as Prisma errors and mapped via mapPrismaError()
+
+---
+8. MIDDLEWARE REGISTRATION ORDER
+---
+File: src/server.ts
+
+Critical ordering:
+1. Routes are registered first (/api/v1/auth, /api/v1/users)
+2. Error handler middleware is registered LAST
+
+Code:
+```typescript
+// server.ts
+import app from "./app.js";
+import userRoutes from "./modules/user/user.routes.js";
+import authRoutes from "./modules/auth/auth.routes.js";
+import { errorHandler } from "./errors/error.handler.js"; // ✅ central error handler
+// import { authenticate } from "./middlewares/auth.middleware.js";
+
+// Test route
+app.get("/", (req, res) => {
+    res.send("Hello");
+});
+
+// Register routes before error handler
+app.use("/api/v1/auth", authRoutes);
+
+// --- Everything below this line requires a login token ---
+// app.use(authenticate);
+app.use("/api/v1/users", userRoutes);
+
+// ⚠️ Central error handler (Note: This MUST be the last middleware)
+app.use(errorHandler);
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is up on port ${PORT}`);
+});
+```
+
+This is critical because Express only invokes middleware in order, and the error handler needs to catch errors from all routes.
+
+Routes (src/modules/auth/auth.routes.ts):
+```typescript
+// modules/auth/auth.routes.ts
+import { Router } from "express";
+import { AuthController } from "./auth.controller.js";
+
+const router = Router();
+const authController = new AuthController();
+
+router.post("/login", authController.userLogin); // POST /api/v1/auth/login
+
+export default router;
+```
+
+---
+9. COMPLETE REQUEST FLOW EXAMPLE: USER LOGIN WITH INVALID PASSWORD
+---
+
+Step-by-step execution when a user calls POST /api/v1/auth/login with wrong password:
+
+1. REQUEST RECEIVED
+   POST /api/v1/auth/login
+   Body: { userEmail: "user@example.com", password: "wrongpassword" }
+
+2. ROUTING
+   Express matches route to AuthController.userLogin
+
+3. CONTROLLER LAYER (auth.controller.ts)
+   try {
+       Validates: userEmail and password present ✓
+       Calls: authService.login(userEmail, password)
+
+4. SERVICE LAYER (auth.service.ts)
+   try {
+       Executes: prisma.users.findUnique({ where: { user_email } })
+       Result: ✓ User found
+       
+       Executes: verifyPassword(password, user.hsd_pwd)
+       Result: ✓ Password comparison returns FALSE (wrong password)
+       
+       Action: Throws new AppError("Invalid email or password", 401)
+
+5. SERVICE ERROR CATCH
+   catch (error) {
+       Calls: mapPrismaError(error)
+       Check: Is error a PrismaError? NO
+       Result: mapPrismaError() rethrows it as-is (AppError is not a PrismaError)
+
+6. CONTROLLER ERROR CATCH
+   catch (error) {
+       Calls: next(error)
+       Effect: Passes the AppError to the next middleware in the chain
+
+7. GLOBAL ERROR HANDLER MIDDLEWARE (error.handler.ts)
+   Receives: error = AppError("Invalid email or password", 401)
+   
+   Step 1 - Logging:
+   logger.error() records:
+   {
+       message: "Invalid email or password",
+       stack: [full JavaScript stack trace],
+       url: "/api/v1/auth/login",
+       method: "POST",
+       ip: "192.168.1.1",
+       userId: null (not authenticated yet)
+   }
+   Saved to: ./logs/app-2026-06-20.json
+   
+   Step 2 - Error Type Classification:
+   - Is it PrismaClientKnownRequestError? NO
+   - Is it AppError? YES ✓
+   
+   Step 3 - Response Construction:
+   res.status(err.statusCode).json({ error: err.message })
+   res.status(401).json({ error: "Invalid email or password" })
+
+8. HTTP RESPONSE SENT TO CLIENT
+   Status Code: 401 Unauthorized
+   Body: { "error": "Invalid email or password" }
+   Headers: Content-Type: application/json
+
+---
+10. ALTERNATIVE FLOW EXAMPLE: DATABASE UNIQUE CONSTRAINT VIOLATION
+---
+
+POST /api/v1/users (create user with duplicate email)
+   ↓
+Controller validation passes
+   ↓
+Service.create() → prisma.users.create({...})
+   ↓
+Prisma detects duplicate email (UNIQUE constraint)
+Throws: PrismaClientKnownRequestError with code: P2002
+   ↓
+catch in service → mapPrismaError(error)
+   ↓
+mapPrismaError() checks error.code === "P2002"
+   ↓
+Throws: new AppError("Unique constraint failed on: [user_email]", 409)
+   ↓
+catch in controller → next(error)
+   ↓
+errorHandler middleware receives AppError with statusCode 409
+   ↓
+logger.error() records the error
+   ↓
+Checks: Is it AppError? YES ✓
+   ↓
+Sends: 409 Conflict
+Body: { "error": "Unique constraint failed on: [user_email]" }
+
+---
+11. SUMMARY TABLE
+---
+
+Component                File                               Role                    Responsibility
+────────────────────────────────────────────────────────────────────────────────────────────────────
+AppError                src/errors/app.error.ts            Custom error class      Represents operational errors with HTTP status codes
+Error Handler           src/errors/error.handler.ts        Central middleware      Catches all errors, logs them, determines response
+Prisma Mapper           src/utils/prisma.error-mapper.ts   Error translator        Converts DB errors to AppError instances
+Logger                  src/logs/Logger.ts                 Logging engine          Records errors to file and dashboard
+Controllers             src/modules/*/X.controller.ts      First catch point       Validates input, catches service errors, passes to middleware
+Services                src/modules/*/X.service.ts         DB interaction          Executes queries, maps Prisma errors
+Auth Middleware         src/middlewares/auth.middleware.ts Token validation        Extracts and verifies JWT, throws AppError if invalid
+Routes                  src/modules/*/X.routes.ts          Endpoint mapping        Connects HTTP routes to controllers
+Server                  src/server.ts                       App bootstrap           Registers routes, attaches error handler last
+
+---
+12. KEY ARCHITECTURAL PRINCIPLES
+---
+
+1. SINGLE RESPONSIBILITY:
+   - Each layer (controller, service, error handler) has one job
+   - Services handle data/business logic
+   - Controllers handle HTTP validation/response
+   - Middleware handles cross-cutting concerns (auth, errors)
+
+2. ERROR PROPAGATION:
+   - Services throw AppError or let Prisma errors bubble up
+   - Controllers catch and pass to middleware via next(error)
+   - Error handler processes all errors in one place
+
+3. ERROR CLASSIFICATION:
+   - Operational errors (expected): AppError instances → meaningful status codes
+   - Database errors (expected): Prisma errors → mapped to AppError
+   - Programming errors (unexpected): Generic errors → 500 response
+
+4. LOGGING CONTEXT:
+   - Every error is logged with request context
+   - Logs include stack trace for debugging
+   - User ID tracked when authenticated
+
+5. HTTP STATUS CODES:
+   - 400: Bad request (missing fields, validation failure)
+   - 401: Unauthorized (invalid credentials, expired token)
+   - 404: Not found (record doesn't exist)
+   - 409: Conflict (unique constraint violation)
+   - 500: Internal server error (programming errors, uncaught exceptions)
+
+---
+13. ERROR HANDLING CHECKLIST
+---
+
+When adding a new endpoint:
+✓ Wrap controller logic in try-catch
+✓ Validate input and throw AppError with 400 if invalid
+✓ Call service method
+✓ Catch errors and call next(error)
+
+When writing a service:
+✓ Wrap Prisma calls in try-catch
+✓ Add business logic validation, throw AppError with appropriate status
+✓ In catch block, call mapPrismaError(error)
+✓ All errors will be caught by the controller
+
+When adding authentication:
+✓ Use authenticate middleware
+✓ It will throw AppError(401) on token issues
+✓ Error handler will convert to HTTP response
+
+When database errors occur:
+✓ Prisma throws PrismaClientKnownRequestError
+✓ mapPrismaError() converts to AppError with semantic message
+✓ Controller passes to error handler
+✓ User gets meaningful response (409 for duplicate, 404 for not found, etc.)
+
+================================================================================
+END OF ANALYSIS
+================================================================================

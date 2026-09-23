@@ -1,47 +1,87 @@
+enum UserStatus {
+    ACTIVE
+    INACTIVE
+    LOCKED
+}
+
+enum TenantStatus {
+    ACTIVE
+    SUSPENDED
+    INACTIVE
+}
+
+enum MembershipStatus {
+    ACTIVE
+    INACTIVE
+}
+
+enum TenantDatabaseStatus {
+    ACTIVE
+    INACTIVE
+}
+
 model User {
-    id        Int      @id @default(autoincrement()) @map("user_id")
-    firstname String   @db.VarChar(50)
-    lastname  String   @db.VarChar(50)
-    userEmail String   @map("user_email") @db.VarChar(100)
-    password  String   @db.VarChar(200)
-    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+    id           String         @id @default(uuid()) @db.Uuid
+    email        String         @unique @db.VarChar(255)
+    passwordHash String         @map("password_hash") @db.VarChar(255)
+    firstName    String         @map("first_name") @db.VarChar(100)
+    lastName     String?        @map("last_name") @db.VarChar(100)
+    status       UserStatus     @default(ACTIVE)
+    createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz
 
-    assignedRoles Role[]
+    memberships  UserTenantMembership[]
 
-    @@unique([userEmail])
-    @@index([userEmail])
+    @@index([email])
     @@map("users")
 }
 
-model Role {
-    id        Int      @id @default(autoincrement()) @map("role_id")
-    roleName  String   @unique @map("role_name") @db.VarChar(100)
-    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
-    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+model Tenant {
+    id              String                  @id @default(uuid()) @db.Uuid
+    name            String                  @db.VarChar(200)
+    code            String                  @unique @db.VarChar(50)
+    status          TenantStatus            @default(ACTIVE)
+    createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz
 
-    users              User[]
-    grantedPermissions Permission[]
+    memberships     UserTenantMembership[]
+    databaseConfig  TenantDatabaseConfig?
 
-    @@map("roles")
+    @@index([code])
+    @@map("tenants")
 }
 
-model Permission {
-    id             Int    @id @default(autoincrement()) @map("permission_id")
-    permissionName String @unique @map("permission_name") @db.VarChar(100) // e.g., "students", "fees", "attendance"
+model UserTenantMembership {
+    id        String           @id @default(uuid()) @db.Uuid
+    userId    String           @map("user_id") @db.Uuid
+    tenantId  String           @map("tenant_id") @db.Uuid
+    status    MembershipStatus @default(ACTIVE)
+    createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz
 
-    // CRUD Matrix Flags
-    canRead       Boolean  @default(false) @map("can_read")
-    canAdd        Boolean  @default(false) @map("can_add")
-    canEdit       Boolean  @default(false) @map("can_edit")
-    canDelete     Boolean  @default(false) @map("can_delete")
-    isRestricted  Boolean  @default(false) @map("is_restricted")
-    isExceptional Boolean  @default(false) @map("is_exceptional")
+    user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+    tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-    createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-    updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+    @@unique([userId, tenantId])
+    @@index([userId])
+    @@index([tenantId])
+    @@map("user_tenant_memberships")
+}
 
-    owningRoles Role[]
+model TenantDatabaseConfig {
+    id                 String                 @id @default(uuid()) @db.Uuid
+    tenantId           String                 @unique @map("tenant_id") @db.Uuid
+    databaseName       String                 @map("database_name") @db.VarChar(255)
+    host               String                 @db.VarChar(255)
+    port               Int                    @db.Integer
+    username           String                 @db.VarChar(255)
+    passwordSecretRef  String                 @map("password_secret_ref") @db.VarChar(255)
+    status             TenantDatabaseStatus   @default(ACTIVE)
+    createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt          DateTime               @updatedAt @map("updated_at") @db.Timestamptz
 
-    @@map("permissions")
+    tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+    @@index([tenantId])
+    @@map("tenant_database_configs")
 }

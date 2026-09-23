@@ -22,15 +22,21 @@ jobs:
             - name: Install Dependencies
               run: npm ci
 
-            - name: Generate Prisma Client
+            - name: Generate Admin Prisma Client
               env:
-                  DATABASE_URL: ${{ secrets.DATABASE_URL }}
-              run: npx prisma generate
+                  ADMIN_DATABASE_URL: ${{ secrets.ADMIN_DATABASE_URL }}
+              run: npx prisma generate --schema prisma/admin/schema.prisma
+
+            - name: Generate Tenant Prisma Client
+              env:
+                  TENANT_DATABASE_URL: ${{ secrets.TENANT_DATABASE_URL }}
+              run: npx prisma generate --schema prisma/tenant/schema.prisma
 
             - name: Build Application
               run: npm run build
               env:
-                  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+                  ADMIN_DATABASE_URL: ${{ secrets.ADMIN_DATABASE_URL }}
+                  TENANT_DATABASE_URL: ${{ secrets.TENANT_DATABASE_URL }}
 
             - name: Verify Build Output
               run: |
@@ -38,6 +44,8 @@ jobs:
                   ls -la
                   ls -la dist
                   ls -la prisma
+                  ls -la node_modules/.prisma/admin-client
+                  ls -la node_modules/.prisma/tenant-client
 
             - name: Upload Files to DigitalOcean Droplet
               uses: appleboy/scp-action@v0.1.7
@@ -46,7 +54,7 @@ jobs:
                   username: root
                   key: ${{secrets.SSH_PRIVATE_KEY}}
                   port: 22
-                  source: "dist/**,prisma/**,prisma.config.ts,package.json,package-lock.json"
+                  source: "dist/**,prisma/**,prisma.config.ts,prisma.tenant.config.ts,package.json,package-lock.json"
                   target: "/root/api.erp"
                   overwrite: true
 
@@ -67,6 +75,8 @@ jobs:
 
                       cd /root/api.erp
                       npm ci --omit=dev
+                      npx prisma generate --schema prisma/admin/schema.prisma
+                      npx prisma generate --schema prisma/tenant/schema.prisma
                       pm2 restart api-erp || pm2 start dist/server.js --name api-erp
                       pm2 save
 

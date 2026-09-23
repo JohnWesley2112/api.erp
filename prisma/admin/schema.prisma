@@ -1,0 +1,97 @@
+generator client {
+    provider = "prisma-client-js"
+    output   = "../../node_modules/.prisma/admin-client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("ADMIN_DATABASE_URL")
+}
+
+enum UserStatus {
+    ACTIVE
+    INACTIVE
+    LOCKED
+}
+
+enum TenantStatus {
+    ACTIVE
+    SUSPENDED
+    INACTIVE
+}
+
+enum MembershipStatus {
+    ACTIVE
+    INACTIVE
+}
+
+enum TenantDatabaseStatus {
+    ACTIVE
+    INACTIVE
+}
+
+model User {
+    id           String   @id @default(uuid()) @db.Uuid
+    email        String   @unique @db.VarChar(255)
+    passwordHash String   @map("password_hash") @db.VarChar(255)
+    firstName    String   @map("first_name") @db.VarChar(100)
+    lastName     String?  @map("last_name") @db.VarChar(100)
+    status       UserStatus @default(ACTIVE)
+    createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+    memberships UserTenantMembership[]
+
+    @@index([email])
+    @@map("users")
+}
+
+model Tenant {
+    id             String   @id @default(uuid()) @db.Uuid
+    name           String   @db.VarChar(200)
+    code           String   @unique @db.VarChar(50)
+    status         TenantStatus @default(ACTIVE)
+    createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+    memberships    UserTenantMembership[]
+    databaseConfig TenantDatabaseConfig?
+
+    @@index([code])
+    @@map("tenants")
+}
+
+model UserTenantMembership {
+    id        String           @id @default(uuid()) @db.Uuid
+    userId    String           @map("user_id") @db.Uuid
+    tenantId  String           @map("tenant_id") @db.Uuid
+    status    MembershipStatus @default(ACTIVE)
+    createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+    user   User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+    tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, tenantId])
+    @@index([userId])
+    @@index([tenantId])
+    @@map("user_tenant_memberships")
+}
+
+model TenantDatabaseConfig {
+    id                String               @id @default(uuid()) @db.Uuid
+    tenantId          String               @unique @map("tenant_id") @db.Uuid
+    databaseName      String               @map("database_name") @db.VarChar(255)
+    host              String               @db.VarChar(255)
+    port              Int                  @db.Integer
+    username          String               @db.VarChar(255)
+    passwordSecretRef String               @map("password_secret_ref") @db.VarChar(255)
+    status            TenantDatabaseStatus @default(ACTIVE)
+    createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz
+    updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+    tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+    @@index([tenantId])
+    @@map("tenant_database_configs")
+}

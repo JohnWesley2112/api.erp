@@ -1,5 +1,6 @@
 export interface IJwtPayload {
-    userId: number;
+    userId: string;
     email: string;
-    role: string;
+    tenantId?: string;
+    sub?: string;
 }

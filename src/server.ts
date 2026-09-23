@@ -1,30 +1,46 @@
 // server.ts
 import app from "./app.js";
-import userRoutes from "./modules/user/user.routes.js";
-import authRoutes from "./modules/auth/auth.routes.js";
-import iamRoutes from "./modules/iam/iam.routes.js";
-import { errorHandler } from "./errors/error.handler.js"; // ✅ central error handler
-// import { authenticate } from "./middlewares/auth.middleware.js";
+import { errorHandler } from "./errors/error.handler.js";
+import { env } from "./config/env.js";
+import logger from "./logs/Logger.js";
+import { tenantConnectionManager } from "./infrastructure/database/tenant-connection-manager.js";
 
-// Test route
-app.get("/", (req, res) => {
-    res.send("Hello");
+app.get("/", (_req, res) => {
+    res.json({
+        success: true,
+        data: {
+            name: "Systra API",
+            status: "running",
+            environment: env.nodeEnv,
+        },
+    });
 });
 
-app.use("/api/v1/iam", iamRoutes);
-
-// Register routes before error handler
-app.use("/api/v1/auth", authRoutes);
-
-// --- Everything below this line requires a login token ---
-// app.use(authenticate);
-app.use("/api/v1/users", userRoutes);
-
-// ⚠️ Central error handler (Note: This MUST be the last middleware)
 app.use(errorHandler);
 
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server is up on port ${PORT}`);
+const server = app.listen(env.port, () => {
+    logger.info("Systra API listening", { port: env.port, environment: env.nodeEnv, timestamp: new Date().toISOString() });
+});
+
+let isShuttingDown = false;
+
+const shutdown = async (signal: string) => {
+    if (isShuttingDown) {
+        return;
+    }
+    isShuttingDown = true;
+
+    logger.info("Shutting down Systra API", { signal, timestamp: new Date().toISOString() });
+
+    server.close();
+    await tenantConnectionManager.disconnectAll();
+
+    process.exit(0);
+};
+
+process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+});
+process.on("SIGINT", () => {
+    void shutdown("SIGINT");
 });

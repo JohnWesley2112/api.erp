@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../../node_modules/.prisma/tenant-client/index.js";
 import { AppError } from "../errors/app.error.js";
 
 export function mapPrismaError(error: unknown): never {

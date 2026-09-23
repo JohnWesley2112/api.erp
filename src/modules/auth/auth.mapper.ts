@@ -1,12 +1,22 @@
-import type { UserResponseDTO } from "./auth.dto.js";
+interface AuthUserRole {
+    id: number;
+}
+
+interface AuthUser {
+    userEmail: string;
+    firstname: string;
+    lastname: string;
+    assignedRoles?: AuthUserRole[];
+}
 
 export class AuthMapper {
-    static toResponse(dbUser: any, token: string): UserResponseDTO {
+    static toResponse(dbUser: AuthUser, token: string) {
         return {
-            userEmail: dbUser.user_email,
-            firstname: dbUser.user_firstname,
-            lastname: dbUser.user_lastname,
-            token: token,
+            userEmail: dbUser.userEmail,
+            firstname: dbUser.firstname,
+            lastname: dbUser.lastname,
+            token,
+            roles: dbUser.assignedRoles?.map((role) => role.id) ?? [],
         };
     }
 }
