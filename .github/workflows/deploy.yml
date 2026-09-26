@@ -22,16 +22,6 @@ jobs:
             - name: Install Dependencies
               run: npm ci
 
-            - name: Generate Admin Prisma Client
-              env:
-                  ADMIN_DATABASE_URL: ${{ secrets.ADMIN_DATABASE_URL }}
-              run: npx prisma generate --schema prisma/admin/schema.prisma
-
-            - name: Generate Tenant Prisma Client
-              env:
-                  TENANT_DATABASE_URL: ${{ secrets.TENANT_DATABASE_URL }}
-              run: npx prisma generate --schema prisma/tenant/schema.prisma
-
             - name: Build Application
               run: npm run build
               env:
