@@ -6,7 +6,7 @@ import { PrismaClient } from "../../node_modules/.prisma/tenant-client";
 // });
 
 const prisma = new PrismaClient({
-    datasourceUrl: `postgresql://postgres:${encodeURIComponent(
+    datasourceUrl: `postgresql://${encodeURIComponent(process.env.TENANT_DB_USERNAME)}:${encodeURIComponent(
         process.env.TENANT_DB_PASSWORD ?? ""
     )}@localhost:5432/erpdb_tenant`,
 });
