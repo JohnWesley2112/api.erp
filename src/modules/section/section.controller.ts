@@ -14,7 +14,6 @@ export class SectionController {
             const page = Number(req.query.page ?? 1);
             const pageSize = Number(req.query.pageSize ?? 20);
             const academicYearId = typeof req.query.academicYearId === "string" ? req.query.academicYearId : undefined;
-            const campusId = typeof req.query.campusId === "string" ? req.query.campusId : undefined;
             const classId = typeof req.query.classId === "string" ? req.query.classId : undefined;
             const status = typeof req.query.status === "string" ? req.query.status : undefined;
             const search = typeof req.query.search === "string" ? req.query.search : undefined;
@@ -23,7 +22,6 @@ export class SectionController {
                 page,
                 pageSize,
                 ...(academicYearId ? { academicYearId } : {}),
-                ...(campusId ? { campusId } : {}),
                 ...(classId ? { classId } : {}),
                 ...(status ? { status } : {}),
                 ...(search ? { search } : {}),

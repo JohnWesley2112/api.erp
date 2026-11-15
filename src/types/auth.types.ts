@@ -18,5 +18,5 @@ export interface AuthResult {
 export interface JWTPayload {
     userId: string;
     email: string;
-    tenantId?: string;
+    tenantId?: number;
 }

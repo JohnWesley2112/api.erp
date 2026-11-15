@@ -1,0 +1,87 @@
+erDiagram
+    students {
+        String id PK
+        String admission_number UK
+        String first_name
+        String middle_name
+        String last_name
+        DateTime date_of_birth
+        String gender
+        StudentStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    guardians {
+        String id PK
+        String first_name
+        String last_name
+        String phone
+        String email
+        String relationship
+        DateTime created_at
+        DateTime updated_at
+    }
+    student_guardians {
+        String student_id PK, FK
+        String guardian_id PK, FK
+        Boolean is_primary
+    }
+    enrollments {
+        String id PK
+        String student_id FK
+        String academic_year_id FK
+        String class_id FK
+        String section_id FK
+        EnrollmentStatus status
+        DateTime enrolled_at
+        DateTime created_at
+        DateTime updated_at
+    }
+    academic_years {
+        String id PK
+        String name UK
+        DateTime start_date
+        DateTime end_date
+        AcademicYearStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    classes {
+        String id PK
+        String name
+        String code UK
+        Int display_order
+        ClassStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    sections {
+        String id PK
+        String academic_year_id FK
+        String class_id FK
+        String name
+        SectionStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    admission_serials {
+        String academic_year_id PK, FK
+        Int last_serial
+        DateTime updated_at
+    }
+
+    students ||--o{ student_guardians : "student_id"
+    guardians ||--o{ student_guardians : "guardian_id"
+    students ||--o{ enrollments : "student_id"
+    academic_years ||--o{ enrollments : "academic_year_id"
+    classes ||--o{ enrollments : "class_id"
+    sections ||--o{ enrollments : "section_id"
+    academic_years ||--o{ sections : "academic_year_id"
+    classes ||--o{ sections : "class_id"
+    academic_years ||--o| admission_serials : "academic_year_id"
+
+%% UK constraint: students.admission_number
+%% UK constraint: enrollments(student_id, academic_year_id)
+%% UK constraint: sections(academic_year_id, class_id, name)
+%% Nullable: students.middle_name, last_name, date_of_birth, gender
+%% Nullable: guardians.last_name, phone, email, relationship

@@ -34,7 +34,7 @@ const ORIGINAL_ENV = { ...process.env };
 const buildApp = () => {
     const app = express();
     app.use((req: AppRequest, _res, next) => {
-        req.auth = { userId: "user-1", tenantId: "tenant-1" };
+        req.auth = { userId: "user-1", tenantId: 1 };
         next();
     });
     app.use(resolveTenantContext);
@@ -49,7 +49,7 @@ const mockActiveMembership = () => {
     mockMembershipFindFirst.mockResolvedValue({
         id: "membership-1",
         status: "ACTIVE",
-        tenant: { id: "tenant-1", status: "ACTIVE" },
+        tenant: { id: 1, status: "ACTIVE" },
     });
 };
 
@@ -189,11 +189,11 @@ describe("tenant database credential resolution", () => {
         expect(mockTenantConnectionManagerGetClient).toHaveBeenCalledTimes(2);
         expect(mockTenantConnectionManagerGetClient).toHaveBeenNthCalledWith(
             1,
-            expect.objectContaining({ tenantId: "tenant-1", password: "primary-tenant-password" }),
+            expect.objectContaining({ tenantId: 1, password: "primary-tenant-password" }),
         );
         expect(mockTenantConnectionManagerGetClient).toHaveBeenNthCalledWith(
             2,
-            expect.objectContaining({ tenantId: "tenant-1", password: "primary-tenant-password" }),
+            expect.objectContaining({ tenantId: 1, password: "primary-tenant-password" }),
         );
     });
 });

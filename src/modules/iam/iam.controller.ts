@@ -10,12 +10,12 @@ export class IamController {
     private iamService = new IamService();
 
     getRoles = async (
-        _req: AppRequest,
+        req: AppRequest,
         res: AppResponse,
         next: AppNextFunction,
     ) => {
         try {
-            const allRoles = await this.iamService.getAllRoles();
+            const allRoles = await this.iamService.getAllRoles(req.tenantDb);
             return res.status(200).json({
                 success: true,
                 data: allRoles,
@@ -26,12 +26,12 @@ export class IamController {
     };
 
     getAllPermissions = async (
-        _req: AppRequest,
+        req: AppRequest,
         res: AppResponse,
         next: AppNextFunction,
     ) => {
         try {
-            const allPermissions = await this.iamService.getAllPermissions();
+            const allPermissions = await this.iamService.getAllPermissions(req.tenantDb);
             return res.status(200).json({
                 success: true,
                 data: allPermissions,
@@ -42,12 +42,15 @@ export class IamController {
     };
 
     getAllPermissionsWithRoles = async (
-        _req: AppRequest,
+        req: AppRequest,
         res: AppResponse,
         next: AppNextFunction,
     ) => {
         try {
-            const permissions = await this.iamService.getAllPermissionsWithRoles();
+            if (!req.user?.userId) {
+                throw new AppError("Authentication required", 401, "UNAUTHORIZED");
+            }
+            const permissions = await this.iamService.getAllPermissionsWithRoles(req.tenantDb, req.user.userId);
             return res.status(200).json({
                 success: true,
                 data: permissions,
@@ -58,12 +61,15 @@ export class IamController {
     };
 
     getRolePermissions = async (
-        _req: AppRequest,
+        req: AppRequest,
         res: AppResponse,
         next: AppNextFunction,
     ) => {
         try {
-            const allRolesPermissions = await this.iamService.getAllRolePermissions();
+            if (!req.user?.userId) {
+                throw new AppError("Authentication required", 401, "UNAUTHORIZED");
+            }
+            const allRolesPermissions = await this.iamService.getAllRolePermissions(req.tenantDb, req.user.userId);
             return res.status(200).json({
                 success: true,
                 data: allRolesPermissions,
@@ -93,7 +99,7 @@ export class IamController {
                 });
             }
 
-            const allRolesPermissions = await this.iamService.getAllUserPermissions(rawUserId);
+            const allRolesPermissions = await this.iamService.getAllUserPermissions(rawUserId, req.tenantDb);
             return res.status(200).json({
                 success: true,
                 data: allRolesPermissions,
@@ -121,11 +127,56 @@ export class IamController {
                 });
             }
 
-            const allPermissions = await this.iamService.getPermissionWithRoles(rawId);
+            const allPermissions = await this.iamService.getPermissionWithRoles(rawId, req.tenantDb);
             return res.status(200).json({
                 success: true,
                 data: allPermissions,
             });
+        } catch (error) {
+            return next(error);
+        }
+    };
+
+    grantRolePermission = async (
+        req: AppRequest,
+        res: AppResponse,
+        next: AppNextFunction,
+    ) => this.changeRolePermission(req, res, next, true);
+
+    revokeRolePermission = async (
+        req: AppRequest,
+        res: AppResponse,
+        next: AppNextFunction,
+    ) => this.changeRolePermission(req, res, next, false);
+
+    private changeRolePermission = async (
+        req: AppRequest,
+        res: AppResponse,
+        next: AppNextFunction,
+        granted: boolean,
+    ) => {
+        const roleId = Array.isArray(req.params.roleId) ? req.params.roleId[0] : req.params.roleId;
+        const permissionCode = Array.isArray(req.params.permissionCode)
+            ? req.params.permissionCode[0]
+            : req.params.permissionCode;
+
+        try {
+            const actorUserId = req.user?.userId;
+            if (!actorUserId) {
+                throw new AppError("Authentication required", 401, "UNAUTHORIZED");
+            }
+            if (!roleId || !permissionCode) {
+                throw new AppError("Role id and permission code are required", 400, "VALIDATION_ERROR");
+            }
+
+            const result = await this.iamService.changeRolePermission({
+                tenantDb: req.tenantDb,
+                actorUserId,
+                roleId,
+                permissionCode,
+                granted,
+            });
+            return res.status(200).json({ success: true, data: result });
         } catch (error) {
             return next(error);
         }

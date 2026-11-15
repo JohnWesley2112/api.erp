@@ -25,7 +25,6 @@ const {
   mockTenantSubjectFindFirst,
   mockTenantSubjectCreate,
   mockTenantSubjectUpdate,
-  mockTenantCampusFindUnique,
   mockTenantAcademicYearFindUnique,
   mockTenantClassFindUnique,
   mockTenantSectionFindUnique,
@@ -57,7 +56,6 @@ const {
   mockTenantSubjectFindFirst: vi.fn(),
   mockTenantSubjectCreate: vi.fn(),
   mockTenantSubjectUpdate: vi.fn(),
-  mockTenantCampusFindUnique: vi.fn(),
   mockTenantAcademicYearFindUnique: vi.fn(),
   mockTenantClassFindUnique: vi.fn(),
   mockTenantSectionFindUnique: vi.fn(),
@@ -103,9 +101,6 @@ vi.mock("../infrastructure/database/tenant-connection-manager.js", () => {
       create: mockTenantSubjectCreate,
       update: mockTenantSubjectUpdate,
     },
-    campus: {
-      findUnique: mockTenantCampusFindUnique,
-    },
     userProfile: {
       findUnique: mockTenantUserProfileFindUnique,
     },
@@ -144,7 +139,7 @@ describe("Phase 8 academic structure", () => {
     process.env.TENANT_DB_PASSWORD = "test-tenant-db-password";
     mockAdminTenantDatabaseConfigFindUnique.mockResolvedValue({
       id: "tdc-1",
-      tenantId: "tenant-1",
+      tenantId: 1,
       databaseName: "tenant_db",
       host: "localhost",
       port: 5432,
@@ -172,7 +167,6 @@ describe("Phase 8 academic structure", () => {
     mockTenantSubjectFindFirst.mockReset();
     mockTenantSubjectCreate.mockReset();
     mockTenantSubjectUpdate.mockReset();
-    mockTenantCampusFindUnique.mockReset();
     mockTenantAcademicYearFindUnique.mockReset();
     mockTenantClassFindUnique.mockReset();
     mockTenantSectionFindUnique.mockReset();
@@ -185,20 +179,18 @@ describe("Phase 8 academic structure", () => {
     mockAdminMembershipFindFirst.mockResolvedValue({
       id: "membership-1",
       userId: "user-1",
-      tenantId: "tenant-1",
+      tenantId: 1,
       status: "ACTIVE",
-      tenant: { id: "tenant-1", name: "Tenant A", status: "ACTIVE" },
+      tenant: { id: 1, name: "Tenant A", status: "ACTIVE" },
     });
 
     mockTenantUserProfileFindUnique.mockResolvedValue({
       id: "profile-1",
       userId: "user-1",
-      campusId: null,
       userRoles: [
         {
           id: "ur-1",
           roleId: "role-1",
-          campusId: null,
           role: { id: "role-1", name: "INSTITUTION_ADMIN" },
         },
       ],
@@ -209,7 +201,6 @@ describe("Phase 8 academic structure", () => {
         id: "ur-1",
         userId: "user-1",
         roleId: "role-1",
-        campusId: null,
         role: { id: "role-1", name: "INSTITUTION_ADMIN" },
       },
     ]);
@@ -221,8 +212,6 @@ describe("Phase 8 academic structure", () => {
         rolePermissions: [
           { permission: { code: "academic.read" } },
           { permission: { code: "academic.manage" } },
-          { permission: { code: "campus.read" } },
-          { permission: { code: "campus.manage" } },
         ],
       },
     ]);
@@ -240,7 +229,6 @@ describe("Phase 8 academic structure", () => {
     mockTenantSubjectFindMany.mockResolvedValue([]);
     mockTenantSubjectCount.mockResolvedValue(0);
     mockTenantSubjectFindFirst.mockResolvedValue(null);
-    mockTenantCampusFindUnique.mockResolvedValue({ id: "campus-1", institutionId: "institution-1", name: "Bangalore Campus", code: "BLR", status: "ACTIVE" });
     mockTenantAcademicYearFindUnique.mockResolvedValue(null);
     mockTenantClassFindUnique.mockResolvedValue(null);
     mockTenantSectionFindUnique.mockResolvedValue(null);
@@ -257,7 +245,7 @@ describe("Phase 8 academic structure", () => {
       status: "ACTIVE",
     });
 
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const response = await request(app)
       .post("/api/academic-years")
@@ -274,7 +262,7 @@ describe("Phase 8 academic structure", () => {
   });
 
   it("rejects invalid academic year date ranges", async () => {
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const response = await request(app)
       .post("/api/academic-years")
@@ -298,7 +286,7 @@ describe("Phase 8 academic structure", () => {
       status: "ACTIVE",
     });
 
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const response = await request(app)
       .post("/api/classes")
@@ -317,7 +305,7 @@ describe("Phase 8 academic structure", () => {
   it("rejects duplicate class codes", async () => {
     mockTenantClassFindUnique.mockResolvedValue({ id: "class-existing" });
 
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const response = await request(app)
       .post("/api/classes")
@@ -331,28 +319,25 @@ describe("Phase 8 academic structure", () => {
     expect(response.status).toBe(409);
   });
 
-  it("creates a section with a valid academic year, campus, and class relationship", async () => {
+  it("creates a section with a valid academic year and class relationship", async () => {
     mockTenantAcademicYearFindUnique.mockResolvedValue({ id: "academic-year-1", name: "2026-2027", startDate: "2026-06-01", endDate: "2027-03-31", status: "ACTIVE" });
-    mockTenantCampusFindUnique.mockResolvedValue({ id: "campus-1", institutionId: "institution-1", name: "Bangalore Campus", code: "BLR", status: "ACTIVE" });
     mockTenantClassFindUnique.mockResolvedValue({ id: "class-1", name: "Grade 10", code: "G10", displayOrder: 10, status: "ACTIVE" });
     mockTenantSectionFindUnique.mockResolvedValue(null);
     mockTenantSectionCreate.mockResolvedValue({
       id: "section-1",
       academicYearId: "academic-year-1",
-      campusId: "campus-1",
       classId: "class-1",
       name: "A",
       status: "ACTIVE",
     });
 
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const response = await request(app)
       .post("/api/sections")
       .set("Authorization", `Bearer ${token}`)
       .send({
         academicYearId: "academic-year-1",
-        campusId: "campus-1",
         classId: "class-1",
         name: "A",
       });
@@ -360,24 +345,6 @@ describe("Phase 8 academic structure", () => {
     expect(response.status).toBe(201);
     expect(response.body.success).toBe(true);
     expect(mockTenantSectionCreate).toHaveBeenCalled();
-  });
-
-  it("rejects a section with an invalid campus relation", async () => {
-    mockTenantCampusFindUnique.mockResolvedValue(null);
-
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
-
-    const response = await request(app)
-      .post("/api/sections")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        academicYearId: "academic-year-1",
-        campusId: "campus-99",
-        classId: "class-1",
-        name: "A",
-      });
-
-    expect(response.status).toBe(404);
   });
 
   it("creates a subject with validation", async () => {
@@ -389,7 +356,7 @@ describe("Phase 8 academic structure", () => {
       status: "ACTIVE",
     });
 
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const response = await request(app)
       .post("/api/subjects")
@@ -405,7 +372,7 @@ describe("Phase 8 academic structure", () => {
   });
 
   it("lists academic structure records in the current tenant", async () => {
-    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: "tenant-1" });
+    const token = generateAccessToken({ userId: "user-1", email: "user@example.com", tenantId: 1 });
 
     const academicYears = await request(app)
       .get("/api/academic-years")

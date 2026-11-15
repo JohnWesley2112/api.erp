@@ -68,7 +68,6 @@ async function main() {
         where: {
             userId: profile.id,
             roleId: role.id,
-            campusId: null,
         },
     });
 
@@ -77,7 +76,6 @@ async function main() {
             data: {
                 userId: profile.id,
                 roleId: role.id,
-                campusId: null,
             },
         });
     }

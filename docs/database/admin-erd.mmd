@@ -1,0 +1,73 @@
+erDiagram
+    users {
+        String id PK
+        String email UK
+        String password_hash
+        String first_name
+        String last_name
+        UserStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    tenants {
+        Int id PK
+        String name
+        String code UK
+        TenantStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    user_tenant_memberships {
+        String id PK
+        String user_id FK
+        Int tenant_id FK
+        MembershipStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    refresh_sessions {
+        String id PK
+        String user_id FK
+        Int selected_tenant_id FK
+        DateTime expires_at
+        DateTime revoked_at
+        DateTime created_at
+        DateTime updated_at
+    }
+    refresh_session_tokens {
+        String id PK
+        String session_id FK
+        String token_hash UK
+        DateTime consumed_at
+        String rotated_from_id FK, UK
+        DateTime created_at
+    }
+    tenant_database_configs {
+        String id PK
+        Int tenant_id FK, UK
+        String database_name
+        String host
+        Int port
+        String username
+        String password_secret_ref
+        TenantDatabaseStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+
+    users ||--o{ user_tenant_memberships : "user_id"
+    tenants ||--o{ user_tenant_memberships : "tenant_id"
+    users ||--o{ refresh_sessions : "user_id"
+    tenants o|--o{ refresh_sessions : "selected_tenant_id"
+    refresh_sessions ||--o{ refresh_session_tokens : "session_id"
+    refresh_session_tokens o|--o| refresh_session_tokens : "rotated_from_id"
+    tenants ||--o| tenant_database_configs : "tenant_id"
+
+%% UK constraint: users.email
+%% UK constraint: tenants.code
+%% UK constraint: user_tenant_memberships(user_id, tenant_id)
+%% UK constraint: refresh_session_tokens.token_hash
+%% UK constraint: refresh_session_tokens.rotated_from_id
+%% UK constraint: tenant_database_configs.tenant_id
+%% Nullable: users.last_name; refresh_sessions.selected_tenant_id, revoked_at
+%% Nullable: refresh_session_tokens.consumed_at, rotated_from_id

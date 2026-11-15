@@ -9,13 +9,11 @@ interface UserListOptions {
     search?: string;
     page?: number;
     pageSize?: number;
-    campusId?: string;
     status?: string;
 }
 
 interface UserRoleAssignmentInput {
     role: string;
-    campusId?: string | null;
 }
 
 export class UserService {
@@ -23,11 +21,12 @@ export class UserService {
         return value.trim().toLowerCase();
     }
 
-    private getTenantDb(tenantId: string) {
-        return createTenantPrismaClient({
-            tenantId,
-            databaseName: `systra_tenant_${tenantId}`,
-        });
+    private requireTenantDb(tenantDb: unknown): ReturnType<typeof createTenantPrismaClient> {
+        if (!tenantDb || typeof tenantDb !== "object" || !("userProfile" in tenantDb)) {
+            throw new AppError("Tenant database context is required", 401, "UNAUTHORIZED");
+        }
+
+        return tenantDb as ReturnType<typeof createTenantPrismaClient>;
     }
 
     private async writeAudit(
@@ -49,7 +48,11 @@ export class UserService {
         });
     }
 
-    private async ensureTenantMembership(tenantId: string, userId: string) {
+    private async ensureTenantMembership(
+        tenantId: number,
+        userId: string,
+        allowInactive = false,
+    ) {
         const membership = await adminPrisma.userTenantMembership.findFirst({
             where: {
                 userId,
@@ -64,7 +67,7 @@ export class UserService {
             throw new AppError("User not found in this tenant", 404, "NOT_FOUND");
         }
 
-        if (membership.status !== "ACTIVE") {
+        if (!allowInactive && membership.status !== "ACTIVE") {
             throw new AppError("Tenant membership is inactive", 403, "TENANT_ACCESS_DENIED");
         }
 
@@ -94,20 +97,6 @@ export class UserService {
         return profile;
     }
 
-    private async validateCampus(tenantDb: ReturnType<typeof createTenantPrismaClient>, campusId: string | null | undefined) {
-        if (!campusId) {
-            return;
-        }
-
-        const campus = await tenantDb.campus.findUnique({
-            where: { id: campusId },
-        });
-
-        if (!campus) {
-            throw new AppError("Campus not found in this tenant", 404, "NOT_FOUND");
-        }
-    }
-
     private async getActorRoleNames(tenantDb: ReturnType<typeof createTenantPrismaClient>, userId: string): Promise<string[]> {
         const profile = await this.resolveProfile(tenantDb, userId);
         return profile.userRoles.map((assignment) => assignment.role?.name).filter(Boolean) as string[];
@@ -117,7 +106,6 @@ export class UserService {
         tenantDb: ReturnType<typeof createTenantPrismaClient>,
         actorUserId: string,
         requestedRoleName: string,
-        campusId?: string | null,
     ): Promise<boolean> {
         const actorRoleNames = await this.getActorRoleNames(tenantDb, actorUserId);
 
@@ -129,41 +117,46 @@ export class UserService {
             return false;
         }
 
-        if (actorRoleNames.includes("CAMPUS_ADMIN")) {
-            if (!campusId) {
-                return false;
-            }
-
-            const profile = await this.resolveProfile(tenantDb, actorUserId);
-            const campusAssignments = profile.userRoles.filter((assignment) => {
-                if (assignment.role?.name === "INSTITUTION_ADMIN") {
-                    return true;
-                }
-                return assignment.campusId === campusId;
-            });
-
-            return campusAssignments.length > 0;
-        }
-
-        return false;
+        return actorRoleNames.includes("CAMPUS_ADMIN");
     }
 
-    async findAll(tenantId: string, options: UserListOptions = {}) {
+    async findAll(tenantId: number, options: UserListOptions = {}, tenantDbInput: unknown) {
         const page = Number(options.page ?? 1);
         const pageSize = Math.min(Math.max(Number(options.pageSize ?? 20), 1), 100);
         const search = options.search?.trim();
 
-        const activeMemberships = await adminPrisma.userTenantMembership.findMany({
-            where: {
-                tenantId,
-                status: "ACTIVE",
-            },
+        const memberships = await adminPrisma.userTenantMembership.findMany({
+            where: { tenantId },
             select: {
                 userId: true,
+                status: true,
             },
         });
 
-        const userIds = activeMemberships.map((membership) => membership.userId);
+        const membershipStatusByUserId = new Map(
+            memberships.map((membership) => [membership.userId, membership.status]),
+        );
+        let userIds = memberships.map((membership) => membership.userId);
+
+        if (options.status === "ACTIVE") {
+            userIds = memberships
+                .filter((membership) => membership.status === "ACTIVE")
+                .map((membership) => membership.userId);
+        } else if (options.status === "INACTIVE") {
+            const inactiveAccounts = await adminPrisma.user.findMany({
+                where: {
+                    id: { in: userIds },
+                    status: "INACTIVE",
+                },
+                select: { id: true },
+            });
+            userIds = [...new Set([
+                ...memberships
+                    .filter((membership) => membership.status === "INACTIVE")
+                    .map((membership) => membership.userId),
+                ...inactiveAccounts.map((user) => user.id),
+            ])];
+        }
 
         if (!userIds.length) {
             return {
@@ -186,7 +179,7 @@ export class UserService {
             ];
         }
 
-        if (options.status) {
+        if (options.status && options.status !== "INACTIVE") {
             where.status = options.status;
         }
 
@@ -207,38 +200,56 @@ export class UserService {
             }),
         ]);
 
-        const tenantDb = this.getTenantDb(tenantId);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
         const profiles = await tenantDb.userProfile.findMany({
             where: {
-                userId: { in: userIds },
-                ...(options.campusId ? { campusId: options.campusId } : {}),
+                userId: { in: users.map((user) => user.id) },
             },
-            select: {
-                userId: true,
-                campusId: true,
-                displayName: true,
-                status: true,
+            include: {
+                userRoles: {
+                    include: {
+                        role: true,
+                    },
+                },
             },
         });
 
         const profileMap = new Map(profiles.map((profile) => [profile.userId, profile]));
 
         return {
-            items: users.map((user) => ({
-                id: user.id,
-                email: user.email,
-                firstName: user.firstName,
-                lastName: user.lastName,
-                status: user.status,
-                profile: profileMap.get(user.id) ?? null,
-            })),
+            items: users.map((user) => {
+                const profile = profileMap.get(user.id);
+                const membershipStatus = membershipStatusByUserId.get(user.id) ?? "INACTIVE";
+                return {
+                    id: user.id,
+                    email: user.email,
+                    firstName: user.firstName,
+                    lastName: user.lastName,
+                    status: membershipStatus === "INACTIVE" || user.status === "INACTIVE"
+                        ? "INACTIVE"
+                        : user.status,
+                    membershipStatus,
+                    profile: profile
+                        ? {
+                            id: profile.id,
+                            displayName: profile.displayName,
+                            status: profile.status,
+                            roles: profile.userRoles.map((assignment) => ({
+                                id: assignment.id,
+                                roleId: assignment.roleId,
+                                role: assignment.role.name,
+                            })),
+                        }
+                        : null,
+                };
+            }),
             total,
             page,
             pageSize,
         };
     }
 
-    async findById(tenantId: string, userId: string) {
+    async findById(tenantId: number, userId: string, tenantDbInput: unknown) {
         await this.ensureTenantMembership(tenantId, userId);
 
         const user = await adminPrisma.user.findUnique({
@@ -256,7 +267,7 @@ export class UserService {
             throw new AppError("User not found", 404, "NOT_FOUND");
         }
 
-        const tenantDb = this.getTenantDb(tenantId);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
         const profile = await this.resolveProfile(tenantDb, userId);
 
         return {
@@ -268,56 +279,52 @@ export class UserService {
             profile: {
                 id: profile.id,
                 userId: profile.userId,
-                campusId: profile.campusId,
                 displayName: profile.displayName,
                 status: profile.status,
                 roles: profile.userRoles.map((assignment) => ({
                     id: assignment.id,
                     roleId: assignment.roleId,
                     role: assignment.role.name,
-                    campusId: assignment.campusId,
                 })),
             },
         };
     }
 
-    async getUserRoles(tenantId: string, userId: string) {
-        await this.ensureTenantMembership(tenantId, userId);
-        const tenantDb = this.getTenantDb(tenantId);
+    async getUserRoles(tenantId: number, userId: string, tenantDbInput: unknown) {
+        await this.ensureTenantMembership(tenantId, userId, true);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
         const profile = await this.resolveProfile(tenantDb, userId);
 
         return profile.userRoles.map((assignment) => ({
             id: assignment.id,
             roleId: assignment.roleId,
             role: assignment.role.name,
-            campusId: assignment.campusId,
         }));
     }
 
     async assignRole(
-        tenantId: string,
+        tenantId: number,
         actorUserId: string,
         targetUserId: string,
         input: UserRoleAssignmentInput,
+        tenantDbInput: unknown,
     ) {
         const requestedRoleName = input.role.trim().toUpperCase();
         if (!requestedRoleName) {
             throw new AppError("Role is required", 400, "VALIDATION_ERROR");
         }
 
-        await this.ensureTenantMembership(tenantId, targetUserId);
+        await this.ensureTenantMembership(tenantId, targetUserId, true);
         if (actorUserId === targetUserId) {
             throw new AppError("Self role changes are not allowed", 403, "FORBIDDEN");
         }
 
-        const tenantDb = this.getTenantDb(tenantId);
-        await this.validateCampus(tenantDb, input.campusId ?? null);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
 
         const actorCanAssign = await this.canAssignRole(
             tenantDb,
             actorUserId,
             requestedRoleName,
-            input.campusId ?? null,
         );
 
         if (!actorCanAssign) {
@@ -337,7 +344,6 @@ export class UserService {
             where: {
                 userId: targetProfile.id,
                 roleId: roleRecord.id,
-                campusId: input.campusId ?? null,
             },
         });
 
@@ -346,7 +352,6 @@ export class UserService {
                 id: existingAssignment.id,
                 roleId: existingAssignment.roleId,
                 role: roleRecord.name,
-                campusId: existingAssignment.campusId,
             };
         }
 
@@ -354,7 +359,6 @@ export class UserService {
             data: {
                 userId: targetProfile.id,
                 roleId: roleRecord.id,
-                campusId: input.campusId ?? null,
             },
         });
 
@@ -367,7 +371,6 @@ export class UserService {
             {
                 userId: targetUserId,
                 role: roleRecord.name,
-                campusId: input.campusId ?? null,
             },
         );
 
@@ -375,17 +378,16 @@ export class UserService {
             id: createdAssignment.id,
             roleId: createdAssignment.roleId,
             role: roleRecord.name,
-            campusId: createdAssignment.campusId,
         };
     }
 
-    async removeRole(tenantId: string, actorUserId: string, targetUserId: string, roleId: string) {
-        await this.ensureTenantMembership(tenantId, targetUserId);
+    async removeRole(tenantId: number, actorUserId: string, targetUserId: string, roleId: string, tenantDbInput: unknown) {
+        await this.ensureTenantMembership(tenantId, targetUserId, true);
         if (actorUserId === targetUserId) {
             throw new AppError("Self role removal is not allowed", 403, "FORBIDDEN");
         }
 
-        const tenantDb = this.getTenantDb(tenantId);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
         const actorCanAssign = await this.canAssignRole(tenantDb, actorUserId, "INSTITUTION_ADMIN");
         if (!actorCanAssign) {
             throw new AppError("You are not allowed to remove this role", 403, "FORBIDDEN");
@@ -419,7 +421,6 @@ export class UserService {
             {
                 userId: targetUserId,
                 role: assignment.role.name,
-                campusId: assignment.campusId,
             },
         );
 
@@ -427,29 +428,28 @@ export class UserService {
             id: assignment.id,
             roleId: assignment.roleId,
             role: assignment.role.name,
-            campusId: assignment.campusId,
         };
     }
 
     async create(
-        tenantId: string,
+        tenantId: number,
         actorUserId: string,
         input: {
             email: string;
             firstName: string;
             lastName?: string;
-            campusId: string;
             role?: string;
             password?: string;
         },
+        tenantDbInput: unknown,
     ) {
         const email = this.normalizeEmail(input.email);
         const firstName = input.firstName.trim();
         const lastName = input.lastName?.trim() ?? "";
         const roleName = (input.role ?? "TEACHER").trim().toUpperCase();
 
-        if (!email || !firstName || !input.campusId) {
-            throw new AppError("Email, first name, and campus are required", 400, "VALIDATION_ERROR");
+        if (!email || !firstName) {
+            throw new AppError("Email and first name are required", 400, "VALIDATION_ERROR");
         }
 
         const existingUser = await adminPrisma.user.findUnique({
@@ -460,8 +460,7 @@ export class UserService {
             throw new AppError("A user with this email already exists", 409, "DUPLICATE_RESOURCE");
         }
 
-        const tenantDb = this.getTenantDb(tenantId);
-        await this.validateCampus(tenantDb, input.campusId);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
 
         const actorRoleNames = await this.getActorRoleNames(tenantDb, actorUserId);
         const actorIsInstitutionAdmin = actorRoleNames.includes("INSTITUTION_ADMIN");
@@ -471,21 +470,13 @@ export class UserService {
             throw new AppError("You are not allowed to create users", 403, "FORBIDDEN");
         }
 
-        if (actorIsCampusAdmin) {
-            const actorProfile = await this.resolveProfile(tenantDb, actorUserId);
-            const campusScopeMatch = actorProfile.userRoles.some((assignment) => assignment.campusId === input.campusId);
-            if (!campusScopeMatch) {
-                throw new AppError("Campus scope is not authorized for this action", 403, "FORBIDDEN");
-            }
-        }
-
         if (roleName === "INSTITUTION_ADMIN" && !actorIsInstitutionAdmin) {
             throw new AppError("You are not allowed to assign this role", 403, "FORBIDDEN");
         }
 
         let createdUser: { id: string; email: string; firstName: string; lastName: string | null; status: "ACTIVE" | "INACTIVE" | "LOCKED" } | null = null;
-        let createdProfile: { id: string; userId: string; campusId: string | null; displayName: string | null; status: string } | null = null;
-        let createdAssignment: { id: string; roleId: string; campusId: string | null } | null = null;
+        let createdProfile: { id: string; userId: string; displayName: string | null; status: string } | null = null;
+        let createdAssignment: { id: string; roleId: string } | null = null;
 
         try {
             const passwordHash = await bcrypt.hash(
@@ -526,7 +517,6 @@ export class UserService {
             createdProfile = await tenantDb.userProfile.create({
                 data: {
                     userId: createdUser.id,
-                    campusId: input.campusId,
                     displayName: [firstName, lastName].filter(Boolean).join(" ") || firstName,
                     status: "ACTIVE",
                 },
@@ -541,7 +531,6 @@ export class UserService {
                     data: {
                         userId: createdProfile.id,
                         roleId: roleExists.id,
-                        campusId: input.campusId,
                     },
                 });
 
@@ -554,7 +543,6 @@ export class UserService {
                     {
                         userId: createdUser.id,
                         role: roleExists.name,
-                        campusId: input.campusId,
                     },
                 );
             } else {
@@ -570,7 +558,6 @@ export class UserService {
                 {
                     email,
                     role: roleName,
-                    campusId: input.campusId,
                 },
             );
 
@@ -583,7 +570,6 @@ export class UserService {
                 profile: {
                     id: createdProfile.id,
                     userId: createdProfile.userId,
-                    campusId: createdProfile.campusId,
                     displayName: createdProfile.displayName,
                 },
                 role: roleName,
@@ -625,12 +611,13 @@ export class UserService {
     }
 
     async updateUser(
-        tenantId: string,
+        tenantId: number,
         actorUserId: string,
         userId: string,
         input: Record<string, unknown>,
+        tenantDbInput: unknown,
     ) {
-        const allowedFields = new Set(["firstName", "lastName", "status", "campusId", "role"]);
+        const allowedFields = new Set(["firstName", "lastName", "status", "role"]);
         const updates = Object.entries(input).filter(([key]) => allowedFields.has(key));
 
         if (updates.length === 0) {
@@ -644,8 +631,8 @@ export class UserService {
             throw new AppError("User not found", 404, "NOT_FOUND");
         }
 
-        const tenantDb = this.getTenantDb(tenantId);
-        const profile = await this.resolveProfile(tenantDb, userId);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
+        await this.resolveProfile(tenantDb, userId);
 
         const nextPayload: Record<string, unknown> = {};
 
@@ -665,14 +652,9 @@ export class UserService {
             nextPayload.status = normalizedStatus;
         }
 
-        if (typeof input.campusId === "string" && input.campusId.trim()) {
-            await this.validateCampus(tenantDb, input.campusId.trim());
-            nextPayload.campusId = input.campusId.trim();
-        }
-
         if (typeof input.role === "string" && input.role.trim()) {
             const normalizedRole = input.role.trim().toUpperCase();
-            await this.assignRole(tenantId, actorUserId, userId, { role: normalizedRole, campusId: typeof input.campusId === "string" ? input.campusId.trim() : profile.campusId });
+            await this.assignRole(tenantId, actorUserId, userId, { role: normalizedRole }, tenantDb);
             nextPayload.role = normalizedRole;
         }
 
@@ -721,13 +703,6 @@ export class UserService {
             );
         }
 
-        if (Object.prototype.hasOwnProperty.call(nextPayload, "campusId")) {
-            await tenantDb.userProfile.update({
-                where: { userId },
-                data: { campusId: String(nextPayload.campusId) },
-            });
-        }
-
         await this.writeAudit(
             tenantDb,
             actorUserId,
@@ -740,12 +715,12 @@ export class UserService {
             },
         );
 
-        return this.findById(tenantId, userId);
+        return this.findById(tenantId, userId, tenantDb);
     }
 
-    async activateUser(tenantId: string, actorUserId: string, userId: string) {
-        await this.ensureTenantMembership(tenantId, userId);
-        const tenantDb = this.getTenantDb(tenantId);
+    async activateUser(tenantId: number, actorUserId: string, userId: string, tenantDbInput: unknown) {
+        await this.ensureTenantMembership(tenantId, userId, true);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
 
         const updatedUser = await adminPrisma.user.update({
             where: { id: userId },
@@ -786,9 +761,9 @@ export class UserService {
         };
     }
 
-    async deactivateUser(tenantId: string, actorUserId: string, userId: string) {
+    async deactivateUser(tenantId: number, actorUserId: string, userId: string, tenantDbInput: unknown) {
         await this.ensureTenantMembership(tenantId, userId);
-        const tenantDb = this.getTenantDb(tenantId);
+        const tenantDb = this.requireTenantDb(tenantDbInput);
 
         const updatedUser = await adminPrisma.user.update({
             where: { id: userId },

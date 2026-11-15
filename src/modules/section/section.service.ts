@@ -34,7 +34,6 @@ const normalizeStatus = (value: unknown) => {
 type SectionRecord = {
     id: string;
     academicYearId: string;
-    campusId: string;
     classId: string;
     name: string;
     status: string;
@@ -48,7 +47,7 @@ export class SectionService {
                 count: (args: unknown) => Promise<unknown>;
             };
         },
-        options: { page?: number; pageSize?: number; academicYearId?: string; campusId?: string; classId?: string; search?: string; status?: string } = {},
+        options: { page?: number; pageSize?: number; academicYearId?: string; classId?: string; search?: string; status?: string } = {},
     ) {
         const page = Number(options.page ?? 1);
         const pageSize = Math.min(Math.max(Number(options.pageSize ?? 20), 1), 100);
@@ -56,9 +55,6 @@ export class SectionService {
 
         if (options.academicYearId) {
             where.academicYearId = options.academicYearId;
-        }
-        if (options.campusId) {
-            where.campusId = options.campusId;
         }
         if (options.classId) {
             where.classId = options.classId;
@@ -80,7 +76,6 @@ export class SectionService {
                 select: {
                     id: true,
                     academicYearId: true,
-                    campusId: true,
                     classId: true,
                     name: true,
                     status: true,
@@ -104,7 +99,6 @@ export class SectionService {
             select: {
                 id: true,
                 academicYearId: true,
-                campusId: true,
                 classId: true,
                 name: true,
                 status: true,
@@ -150,26 +144,9 @@ export class SectionService {
         }
     }
 
-    async ensureCampus(
-        tenantDb: {
-            campus: { findUnique: (args: unknown) => Promise<unknown> };
-        },
-        campusId: string,
-    ) {
-        const campus = await tenantDb.campus.findUnique({
-            where: { id: campusId },
-            select: { id: true },
-        });
-
-        if (!campus) {
-            throw new AppError("Campus not found in this tenant", 404, "NOT_FOUND");
-        }
-    }
-
     async createSection(
         tenantDb: {
             academicYear: { findUnique: (args: unknown) => Promise<unknown> };
-            campus: { findUnique: (args: unknown) => Promise<unknown> };
             class: { findUnique: (args: unknown) => Promise<unknown> };
             section: {
                 findUnique: (args: unknown) => Promise<unknown>;
@@ -183,27 +160,24 @@ export class SectionService {
         input: Record<string, unknown>,
     ): Promise<SectionRecord> {
         const academicYearId = typeof input.academicYearId === "string" ? input.academicYearId : undefined;
-        const campusId = typeof input.campusId === "string" ? input.campusId : undefined;
         const classId = typeof input.classId === "string" ? input.classId : undefined;
         const name = sanitizeText(typeof input.name === "string" ? input.name : undefined, 100);
         const status = normalizeStatus(input.status ?? "ACTIVE");
 
-        if (!academicYearId || !campusId || !classId) {
-            throw new AppError("Academic year, campus, and class are required", 400, "VALIDATION_ERROR");
+        if (!academicYearId || !classId) {
+            throw new AppError("Academic year and class are required", 400, "VALIDATION_ERROR");
         }
         if (!name) {
             throw new AppError("Section name is required", 400, "VALIDATION_ERROR");
         }
 
         await this.ensureAcademicYear(tenantDb, academicYearId);
-        await this.ensureCampus(tenantDb, campusId);
         await this.ensureClass(tenantDb, classId);
 
         const duplicate = await tenantDb.section.findUnique({
             where: {
-                academicYearId_campusId_classId_name: {
+                academicYearId_classId_name: {
                     academicYearId,
-                    campusId,
                     classId,
                     name,
                 },
@@ -212,13 +186,12 @@ export class SectionService {
         }) as { id: string } | null;
 
         if (duplicate) {
-            throw new AppError("A section with this academic year, campus, class, and name already exists", 409, "DUPLICATE_RESOURCE");
+            throw new AppError("A section with this academic year, class, and name already exists", 409, "DUPLICATE_RESOURCE");
         }
 
         const section = await tenantDb.section.create({
             data: {
                 academicYearId,
-                campusId,
                 classId,
                 name,
                 status: status ?? "ACTIVE",
@@ -226,7 +199,6 @@ export class SectionService {
             select: {
                 id: true,
                 academicYearId: true,
-                campusId: true,
                 classId: true,
                 name: true,
                 status: true,
@@ -242,7 +214,6 @@ export class SectionService {
                 metadata: {
                     sectionId: section.id,
                     academicYearId: section.academicYearId,
-                    campusId: section.campusId,
                     classId: section.classId,
                     name: section.name,
                 },
@@ -259,7 +230,6 @@ export class SectionService {
                 update: (args: unknown) => Promise<unknown>;
             };
             academicYear: { findUnique: (args: unknown) => Promise<unknown> };
-            campus: { findUnique: (args: unknown) => Promise<unknown> };
             class: { findUnique: (args: unknown) => Promise<unknown> };
             auditLog: {
                 create: (args: { data: { actorUserId: string; action: string; entityType: string; entityId: string | null; metadata: Prisma.InputJsonValue } }) => Promise<unknown>;
@@ -274,7 +244,6 @@ export class SectionService {
             select: {
                 id: true,
                 academicYearId: true,
-                campusId: true,
                 classId: true,
                 name: true,
                 status: true,
@@ -294,15 +263,6 @@ export class SectionService {
             }
             await this.ensureAcademicYear(tenantDb, academicYearId);
             nextData.academicYearId = academicYearId;
-        }
-
-        if (Object.prototype.hasOwnProperty.call(input, "campusId")) {
-            const campusId = typeof input.campusId === "string" ? input.campusId : undefined;
-            if (!campusId) {
-                throw new AppError("Campus is required", 400, "VALIDATION_ERROR");
-            }
-            await this.ensureCampus(tenantDb, campusId);
-            nextData.campusId = campusId;
         }
 
         if (Object.prototype.hasOwnProperty.call(input, "classId")) {
@@ -330,15 +290,13 @@ export class SectionService {
         }
 
         const finalAcademicYearId = String(nextData.academicYearId ?? section.academicYearId);
-        const finalCampusId = String(nextData.campusId ?? section.campusId);
         const finalClassId = String(nextData.classId ?? section.classId);
         const finalName = String(nextData.name ?? section.name);
 
         const duplicate = await tenantDb.section.findUnique({
             where: {
-                academicYearId_campusId_classId_name: {
+                academicYearId_classId_name: {
                     academicYearId: finalAcademicYearId,
-                    campusId: finalCampusId,
                     classId: finalClassId,
                     name: finalName,
                 },
@@ -347,7 +305,7 @@ export class SectionService {
         }) as { id: string } | null;
 
         if (duplicate && duplicate.id !== section.id) {
-            throw new AppError("A section with this academic year, campus, class, and name already exists", 409, "DUPLICATE_RESOURCE");
+            throw new AppError("A section with this academic year, class, and name already exists", 409, "DUPLICATE_RESOURCE");
         }
 
         const updated = await tenantDb.section.update({
@@ -356,7 +314,6 @@ export class SectionService {
             select: {
                 id: true,
                 academicYearId: true,
-                campusId: true,
                 classId: true,
                 name: true,
                 status: true,

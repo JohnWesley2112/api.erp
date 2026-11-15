@@ -1,5 +1,5 @@
-import crypto from "crypto";
+import { createHash } from "node:crypto";
 
 export const hashRefreshToken = (refreshToken: string) => {
-    return crypto.createHash("sha256").update(refreshToken).digest("hex");
+    return createHash("sha256").update(refreshToken).digest("hex");
 };

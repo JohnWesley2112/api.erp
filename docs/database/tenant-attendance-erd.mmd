@@ -1,0 +1,106 @@
+erDiagram
+    teachers {
+        String id PK
+        String user_id UK
+        String employee_code UK
+        String first_name
+        String last_name
+        TeacherStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    teacher_assignments {
+        String id PK
+        String teacher_id FK
+        String subject_id FK
+        String section_id FK
+        DateTime created_at
+    }
+    subjects {
+        String id PK
+        String name
+        String code UK
+        SubjectStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    sections {
+        String id PK
+        String academic_year_id FK
+        String class_id FK
+        String name
+        SectionStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    academic_years {
+        String id PK
+        String name UK
+        DateTime start_date
+        DateTime end_date
+        AcademicYearStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    classes {
+        String id PK
+        String name
+        String code UK
+        Int display_order
+        ClassStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    attendance_sessions {
+        String id PK
+        String academic_year_id
+        String section_id FK
+        DateTime attendance_date
+        AttendanceSessionStatus status
+        String created_by_user_id
+        DateTime created_at
+        DateTime updated_at
+    }
+    attendance_records {
+        String id PK
+        String attendance_session_id FK
+        String student_id FK
+        AttendanceRecordStatus status
+        String remarks
+        DateTime created_at
+        DateTime updated_at
+    }
+    students {
+        String id PK
+        String admission_number UK
+        String first_name
+        String middle_name
+        String last_name
+        DateTime date_of_birth
+        String gender
+        StudentStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+
+    teachers ||--o{ teacher_assignments : "teacher_id"
+    subjects ||--o{ teacher_assignments : "subject_id"
+    sections ||--o{ teacher_assignments : "section_id"
+    academic_years ||--o{ sections : "academic_year_id"
+    classes ||--o{ sections : "class_id"
+    sections ||--o{ attendance_sessions : "section_id"
+    attendance_sessions ||--o{ attendance_records : "attendance_session_id"
+    students ||--o{ attendance_records : "student_id"
+
+%% UK constraint: teachers.user_id (nullable)
+%% UK constraint: teachers.employee_code
+%% UK constraint: subjects.code
+%% UK constraint: sections(academic_year_id, class_id, name)
+%% UK constraint: teacher_assignments(teacher_id, subject_id, section_id)
+%% UK constraint: attendance_sessions(section_id, attendance_date)
+%% UK constraint: attendance_records(attendance_session_id, student_id)
+%% attendance_sessions.academic_year_id has no declared relation to academic_years.id.
+%% attendance_sessions.created_by_user_id has no declared relation to user_profiles.id.
+%% Nullable: teachers.user_id, teachers.last_name
+%% Nullable: students.middle_name, last_name, date_of_birth, gender
+%% Nullable: attendance_records.remarks

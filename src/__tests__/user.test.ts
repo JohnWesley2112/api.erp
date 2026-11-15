@@ -8,19 +8,21 @@ const {
     mockAdminUserFindMany,
     mockAdminUserCount,
     mockAdminUserCreate,
+    mockAdminUserUpdate,
     mockMembershipFindMany,
     mockMembershipFindFirst,
     mockMembershipCreate,
+    mockMembershipUpdateMany,
     mockTenantFindUnique,
     mockTenantDbUserProfileCreate,
     mockTenantDbUserProfileFindUnique,
     mockTenantDbUserProfileFindMany,
+    mockTenantDbUserProfileUpdate,
     mockTenantDbUserRoleCreate,
     mockTenantDbUserRoleFindFirst,
     mockTenantDbUserRoleFindMany,
     mockTenantDbRoleFindFirst,
     mockTenantDbRoleFindMany,
-    mockTenantDbCampusFindUnique,
     mockTenantDbAuditLogCreate,
     mockAdminTenantDatabaseConfigFindUnique,
 } = vi.hoisted(() => ({
@@ -28,31 +30,31 @@ const {
     mockAdminUserFindMany: vi.fn(),
     mockAdminUserCount: vi.fn(),
     mockAdminUserCreate: vi.fn(),
+    mockAdminUserUpdate: vi.fn(),
     mockMembershipFindMany: vi.fn(),
     mockMembershipFindFirst: vi.fn(),
     mockMembershipCreate: vi.fn(),
+    mockMembershipUpdateMany: vi.fn(),
     mockTenantFindUnique: vi.fn(),
     mockTenantDbUserProfileCreate: vi.fn(),
     mockTenantDbUserProfileFindUnique: vi.fn(),
     mockTenantDbUserProfileFindMany: vi.fn(),
+    mockTenantDbUserProfileUpdate: vi.fn(),
     mockTenantDbUserRoleCreate: vi.fn(),
     mockTenantDbUserRoleFindFirst: vi.fn(),
     mockTenantDbUserRoleFindMany: vi.fn(),
     mockTenantDbRoleFindFirst: vi.fn(),
     mockTenantDbRoleFindMany: vi.fn(),
-    mockTenantDbCampusFindUnique: vi.fn(),
     mockTenantDbAuditLogCreate: vi.fn(),
     mockAdminTenantDatabaseConfigFindUnique: vi.fn(),
 }));
 
 vi.mock("../infrastructure/database/tenant-connection-manager.js", () => {
     const buildTenantDb = () => ({
-        campus: {
-            findUnique: mockTenantDbCampusFindUnique,
-        },
         userProfile: {
             findUnique: mockTenantDbUserProfileFindUnique,
             findMany: mockTenantDbUserProfileFindMany,
+            update: mockTenantDbUserProfileUpdate,
             create: mockTenantDbUserProfileCreate,
         },
         userRole: {
@@ -76,11 +78,13 @@ vi.mock("../infrastructure/database/tenant-connection-manager.js", () => {
                 findMany: mockAdminUserFindMany,
                 count: mockAdminUserCount,
                 create: mockAdminUserCreate,
+                update: mockAdminUserUpdate,
             },
             userTenantMembership: {
                 findMany: mockMembershipFindMany,
                 findFirst: mockMembershipFindFirst,
                 create: mockMembershipCreate,
+                updateMany: mockMembershipUpdateMany,
             },
             tenant: {
                 findUnique: mockTenantFindUnique,
@@ -102,26 +106,28 @@ describe("Phase 6 user management", () => {
         mockAdminUserFindMany.mockReset();
         mockAdminUserCount.mockReset();
         mockAdminUserCreate.mockReset();
+        mockAdminUserUpdate.mockReset();
         mockMembershipFindMany.mockReset();
         mockMembershipFindFirst.mockReset();
         mockMembershipCreate.mockReset();
+        mockMembershipUpdateMany.mockReset();
         mockTenantFindUnique.mockReset();
         mockTenantDbUserProfileCreate.mockReset();
         mockTenantDbUserProfileFindUnique.mockReset();
         mockTenantDbUserProfileFindMany.mockReset();
+        mockTenantDbUserProfileUpdate.mockReset();
         mockTenantDbUserRoleCreate.mockReset();
         mockTenantDbUserRoleFindFirst.mockReset();
         mockTenantDbUserRoleFindMany.mockReset();
         mockTenantDbRoleFindFirst.mockReset();
         mockTenantDbRoleFindMany.mockReset();
-        mockTenantDbCampusFindUnique.mockReset();
         mockTenantDbAuditLogCreate.mockReset();
         mockAdminTenantDatabaseConfigFindUnique.mockReset();
         process.env.TENANT_DB_PASSWORD = "test-tenant-db-password";
 
         mockAdminTenantDatabaseConfigFindUnique.mockResolvedValue({
             id: "tdc-1",
-            tenantId: "tenant-1",
+            tenantId: 1,
             databaseName: "tenant_db",
             host: "localhost",
             port: 5432,
@@ -130,23 +136,31 @@ describe("Phase 6 user management", () => {
             status: "ACTIVE",
         });
 
-        mockTenantFindUnique.mockResolvedValue({ id: "tenant-1", name: "Alpha School", status: "ACTIVE" });
-        mockTenantDbCampusFindUnique.mockResolvedValue({ id: "campus-a", name: "Main Campus", status: "ACTIVE" });
+        mockTenantFindUnique.mockResolvedValue({ id: 1, name: "Alpha School", status: "ACTIVE" });
         mockMembershipFindFirst.mockResolvedValue({
             id: "membership-1",
             userId: "user-1",
-            tenantId: "tenant-1",
+            tenantId: 1,
             status: "ACTIVE",
-            tenant: { id: "tenant-1", name: "Alpha School", status: "ACTIVE" },
+            tenant: { id: 1, name: "Alpha School", status: "ACTIVE" },
+        });
+        mockAdminUserUpdate.mockResolvedValue({
+            id: "user-2",
+            status: "ACTIVE",
+        });
+        mockMembershipUpdateMany.mockResolvedValue({ count: 1 });
+        mockTenantDbUserProfileUpdate.mockResolvedValue({
+            id: "profile-2",
+            userId: "user-2",
+            status: "ACTIVE",
         });
         mockTenantDbUserProfileFindUnique.mockResolvedValue({
             id: "profile-1",
             userId: "user-1",
-            campusId: "campus-a",
             displayName: "Ada Lovelace",
             status: "ACTIVE",
             userRoles: [
-                { id: "ur-1", roleId: "role-1", campusId: "campus-a", role: { id: "role-1", name: "INSTITUTION_ADMIN" } },
+                { id: "ur-1", roleId: "role-1", role: { id: "role-1", name: "INSTITUTION_ADMIN" } },
             ],
         });
 
@@ -155,7 +169,6 @@ describe("Phase 6 user management", () => {
                 id: "ur-1",
                 userId: "user-1",
                 roleId: "role-1",
-                campusId: "campus-a",
                 role: { id: "role-1", name: "INSTITUTION_ADMIN" },
             },
         ]);
@@ -179,9 +192,15 @@ describe("Phase 6 user management", () => {
         mockMembershipFindMany.mockResolvedValue([
             {
                 userId: "user-1",
-                tenantId: "tenant-1",
+                tenantId: 1,
                 status: "ACTIVE",
-                tenant: { id: "tenant-1", name: "Alpha School", status: "ACTIVE" },
+                tenant: { id: 1, name: "Alpha School", status: "ACTIVE" },
+            },
+            {
+                userId: "user-2",
+                tenantId: 1,
+                status: "ACTIVE",
+                tenant: { id: 1, name: "Alpha School", status: "ACTIVE" },
             },
         ]);
         mockAdminUserCount.mockResolvedValue(2);
@@ -204,14 +223,26 @@ describe("Phase 6 user management", () => {
         ]);
 
         mockTenantDbUserProfileFindMany.mockResolvedValue([
-            { userId: "user-1", campusId: "campus-a", displayName: "Ada Lovelace" },
-            { userId: "user-2", campusId: "campus-a", displayName: "Jane Teacher" },
+            {
+                id: "profile-1",
+                userId: "user-1",
+                displayName: "Ada Lovelace",
+                status: "ACTIVE",
+                userRoles: [{ id: "ur-1", roleId: "role-1", role: { name: "INSTITUTION_ADMIN" } }],
+            },
+            {
+                id: "profile-2",
+                userId: "user-2",
+                displayName: "Jane Teacher",
+                status: "ACTIVE",
+                userRoles: [{ id: "ur-2", roleId: "role-2", role: { name: "TEACHER" } }],
+            },
         ]);
 
         const token = generateAccessToken({
             userId: "user-1",
             email: "user@example.com",
-            tenantId: "tenant-1",
+            tenantId: 1,
         });
 
         const response = await request(app)
@@ -222,6 +253,81 @@ describe("Phase 6 user management", () => {
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         expect(response.body.data.length).toBeGreaterThan(0);
+        expect(response.body.data[0].id).toBe("user-1");
+        expect(response.body.data[0].profile.roles[0].role).toBe("INSTITUTION_ADMIN");
+        expect(mockTenantDbUserProfileFindMany).toHaveBeenCalledTimes(1);
+    });
+
+    it("lists inactive tenant members with their roles for reactivation", async () => {
+        mockMembershipFindMany.mockResolvedValue([
+            { userId: "user-1", tenantId: 1, status: "ACTIVE" },
+            { userId: "user-2", tenantId: 1, status: "INACTIVE" },
+        ]);
+        mockAdminUserFindMany.mockImplementation(({ where }: { where: { status?: string; id: { in: string[] } } }) => {
+            if (where.status === "INACTIVE") {
+                return Promise.resolve([{ id: "user-2" }]);
+            }
+            return Promise.resolve([{
+                id: "user-2",
+                email: "inactive@example.com",
+                firstName: "Inactive",
+                lastName: "User",
+                status: "INACTIVE",
+            }]);
+        });
+        mockAdminUserCount.mockResolvedValue(1);
+        mockTenantDbUserProfileFindMany.mockResolvedValue([{
+            id: "profile-2",
+            userId: "user-2",
+            displayName: "Inactive User",
+            status: "INACTIVE",
+            userRoles: [{ id: "ur-2", roleId: "role-2", role: { name: "TEACHER" } }],
+        }]);
+
+        const token = generateAccessToken({
+            userId: "user-1",
+            email: "user@example.com",
+            tenantId: 1,
+        });
+        const response = await request(app)
+            .get("/api/users")
+            .query({ status: "INACTIVE" })
+            .set("Authorization", `******;
+
+        expect(response.status).toBe(200);
+        expect(response.body.data).toHaveLength(1);
+        expect(response.body.data[0].status).toBe("INACTIVE");
+        expect(response.body.data[0].profile.roles[0].role).toBe("TEACHER");
+    });
+
+    it("reactivates an inactive user membership", async () => {
+        mockMembershipFindFirst.mockImplementation(({ where }: { where: { userId: string } }) =>
+            Promise.resolve({
+                id: `membership-${where.userId}`,
+                userId: where.userId,
+                tenantId: 1,
+                status: where.userId === "user-2" ? "INACTIVE" : "ACTIVE",
+                tenant: { id: 1, name: "Alpha School", status: "ACTIVE" },
+            }));
+
+        const token = generateAccessToken({
+            userId: "user-1",
+            email: "user@example.com",
+            tenantId: 1,
+        });
+        const response = await request(app)
+            .post("/api/users/user-2/activate")
+            .set("Authorization", `******;
+
+        expect(response.status).toBe(200);
+        expect(response.body.success).toBe(true);
+        expect(response.body.data.status).toBe("ACTIVE");
+        expect(mockMembershipUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+            data: { status: "ACTIVE" },
+        }));
+        expect(mockTenantDbUserProfileUpdate).toHaveBeenCalledWith(expect.objectContaining({
+            data: { status: "ACTIVE" },
+        }));
     });
 
     it("rejects a cross-tenant user detail lookup", async () => {
@@ -241,18 +347,17 @@ describe("Phase 6 user management", () => {
                 : Promise.resolve({
                     id: "profile-1",
                     userId: "user-1",
-                    campusId: "campus-a",
                     displayName: "Ada Lovelace",
                     status: "ACTIVE",
                     userRoles: [
-                        { id: "ur-1", roleId: "role-1", campusId: "campus-a", role: { id: "role-1", name: "INSTITUTION_ADMIN" } },
+                        { id: "ur-1", roleId: "role-1", role: { id: "role-1", name: "INSTITUTION_ADMIN" } },
                     ],
                 }));
 
         const token = generateAccessToken({
             userId: "user-1",
             email: "user@example.com",
-            tenantId: "tenant-1",
+            tenantId: 1,
         });
 
         const response = await request(app)
@@ -274,7 +379,7 @@ describe("Phase 6 user management", () => {
         const token = generateAccessToken({
             userId: "user-1",
             email: "user@example.com",
-            tenantId: "tenant-1",
+            tenantId: 1,
         });
 
         const response = await request(app)
@@ -284,7 +389,6 @@ describe("Phase 6 user management", () => {
                 email: "existing@example.com",
                 firstName: "New",
                 lastName: "User",
-                campusId: "campus-a",
                 role: "TEACHER",
             });
 
@@ -303,13 +407,12 @@ describe("Phase 6 user management", () => {
         mockMembershipCreate.mockResolvedValue({
             id: "membership-3",
             userId: "user-3",
-            tenantId: "tenant-1",
+            tenantId: 1,
             status: "ACTIVE",
         });
         mockTenantDbUserProfileCreate.mockResolvedValue({
             id: "profile-3",
             userId: "user-3",
-            campusId: "campus-a",
             displayName: "New User",
         });
         mockTenantDbRoleFindMany.mockResolvedValue([
@@ -326,13 +429,12 @@ describe("Phase 6 user management", () => {
             id: "user-role-3",
             userId: "user-3",
             roleId: "role-teacher",
-            campusId: "campus-a",
         });
 
         const token = generateAccessToken({
             userId: "user-1",
             email: "user@example.com",
-            tenantId: "tenant-1",
+            tenantId: 1,
         });
 
         const response = await request(app)
@@ -342,7 +444,6 @@ describe("Phase 6 user management", () => {
                 email: "new@example.com",
                 firstName: "New",
                 lastName: "User",
-                campusId: "campus-a",
                 role: "TEACHER",
             });
 

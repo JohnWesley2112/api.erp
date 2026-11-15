@@ -4,16 +4,16 @@ import { AttendanceService } from "../modules/attendance/attendance.service.js";
 const actor = "user-1";
 
 const session = {
-    id: "session-1", academicYearId: "year-1", campusId: "campus-1", sectionId: "section-1",
+    id: "session-1", academicYearId: "year-1", sectionId: "section-1",
     attendanceDate: new Date("2026-09-19T00:00:00.000Z"), status: "DRAFT", createdByUserId: actor,
 };
 
-const buildDb = (roles: Array<{ campusId: string | null; role: { name: string } }> = [{ campusId: null, role: { name: "INSTITUTION_ADMIN" } }]) => {
+const buildDb = (roles: Array<{ role: { name: string } }> = [{ role: { name: "INSTITUTION_ADMIN" } }]) => {
     const db: Record<string, unknown> = {
         userProfile: { findUnique: vi.fn().mockResolvedValue({ userRoles: roles }) },
-        section: { findUnique: vi.fn().mockResolvedValue({ id: "section-1", campusId: "campus-1", academicYearId: "year-1" }) },
+        section: { findUnique: vi.fn().mockResolvedValue({ id: "section-1", academicYearId: "year-1" }) },
         teacher: { findUnique: vi.fn().mockResolvedValue({ id: "teacher-1", status: "ACTIVE" }) },
-        teacherAssignment: { findFirst: vi.fn().mockResolvedValue({ id: "assignment-1" }) },
+        teacherAssignment: { findFirst: vi.fn().mockResolvedValue({ id: "assignment-1" }), findMany: vi.fn().mockResolvedValue([{ sectionId: "section-1" }]) },
         enrollment: { count: vi.fn().mockResolvedValue(1) },
         attendanceRecord: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
         attendanceSession: {
@@ -30,7 +30,7 @@ const buildDb = (roles: Array<{ campusId: string | null; role: { name: string } 
         userProfile: { findUnique: ReturnType<typeof vi.fn> };
         section: { findUnique: ReturnType<typeof vi.fn> };
         teacher: { findUnique: ReturnType<typeof vi.fn> };
-        teacherAssignment: { findFirst: ReturnType<typeof vi.fn> };
+        teacherAssignment: { findFirst: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
         enrollment: { count: ReturnType<typeof vi.fn> };
         attendanceRecord: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn> };
         attendanceSession: { count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn>; findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
@@ -55,14 +55,14 @@ describe("Phase 11 attendance", () => {
     });
 
     it("rejects marking attendance for a teacher with no section assignment", async () => {
-        const db = buildDb([{ campusId: "campus-1", role: { name: "TEACHER" } }]);
+        const db = buildDb([{ role: { name: "TEACHER" } }]);
         db.teacherAssignment.findFirst.mockResolvedValue(null);
         await expect(new AttendanceService().createSession(db, actor, { sectionId: "section-1", attendanceDate: "2026-09-19" }))
             .rejects.toMatchObject({ statusCode: 403 });
     });
 
     it("allows a teacher assigned to the section to mark attendance", async () => {
-        const db = buildDb([{ campusId: "campus-1", role: { name: "TEACHER" } }]);
+        const db = buildDb([{ role: { name: "TEACHER" } }]);
         const result = await new AttendanceService().createSession(db, actor, { sectionId: "section-1", attendanceDate: "2026-09-19" });
         expect(result.id).toBe("session-1");
     });
@@ -115,15 +115,22 @@ describe("Phase 11 attendance", () => {
         await expect(new AttendanceService().submitSession(db, actor, "session-1")).rejects.toMatchObject({ statusCode: 409 });
     });
 
-    it("filters attendance session lists to the actor's campus", async () => {
-        const db = buildDb([{ campusId: "campus-1", role: { name: "CAMPUS_ADMIN" } }]);
+    it("lists every session in the Tenant for a campus administrator", async () => {
+        const db = buildDb([{ role: { name: "CAMPUS_ADMIN" } }]);
         await new AttendanceService().listSessions(db, actor);
-        expect(db.attendanceSession.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { campusId: { in: ["campus-1"] } } }));
+        expect(db.attendanceSession.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
     });
 
-    it("rejects access to a session from another campus", async () => {
-        const db = buildDb([{ campusId: "campus-1", role: { name: "CAMPUS_ADMIN" } }]);
-        db.attendanceSession.findUnique.mockResolvedValue({ ...session, campusId: "campus-2", attendanceRecords: [] });
+    it("limits a teacher's session list to assigned sections", async () => {
+        const db = buildDb([{ role: { name: "TEACHER" } }]);
+        await new AttendanceService().listSessions(db, actor);
+        expect(db.attendanceSession.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { sectionId: { in: ["section-1"] } } }));
+    });
+
+    it("rejects a teacher reading a session for a section they are not assigned to", async () => {
+        const db = buildDb([{ role: { name: "TEACHER" } }]);
+        db.teacherAssignment.findMany.mockResolvedValue([{ sectionId: "section-2" }]);
+        db.attendanceSession.findUnique.mockResolvedValue({ ...session, attendanceRecords: [] });
         await expect(new AttendanceService().getSession(db, actor, "session-1")).rejects.toMatchObject({ statusCode: 403 });
     });
 });

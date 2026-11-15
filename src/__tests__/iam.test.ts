@@ -37,7 +37,6 @@ vi.mock("../infrastructure/database/tenant-connection-manager.js", () => ({
         teacher: { findUnique: vi.fn() },
         student: { findUnique: vi.fn() },
         section: { findUnique: vi.fn() },
-        campus: { findUnique: vi.fn() },
     })),
     tenantConnectionManager: {
         getClient: vi.fn(() => ({
@@ -49,7 +48,6 @@ vi.mock("../infrastructure/database/tenant-connection-manager.js", () => ({
             teacher: { findUnique: vi.fn() },
             student: { findUnique: vi.fn() },
             section: { findUnique: vi.fn() },
-            campus: { findUnique: vi.fn() },
         })),
     },
 }));
@@ -70,7 +68,7 @@ describe("Phase 5 IAM authorization", () => {
 
         mockTenantDatabaseConfigFindUnique.mockResolvedValue({
             id: "tdc-1",
-            tenantId: "tenant-1",
+            tenantId: 1,
             databaseName: "tenant_db",
             host: "localhost",
             port: 5432,
@@ -91,12 +89,12 @@ describe("Phase 5 IAM authorization", () => {
         mockMembershipFindFirst.mockResolvedValue({
             id: "membership-1",
             userId: "user-1",
-            tenantId: "tenant-1",
+            tenantId: 1,
             status: "ACTIVE",
-            tenant: { id: "tenant-1", name: "Alpha School", status: "ACTIVE" },
+            tenant: { id: 1, name: "Alpha School", status: "ACTIVE" },
         });
 
-        mockTenantFindUnique.mockResolvedValue({ id: "tenant-1", name: "Alpha School" });
+        mockTenantFindUnique.mockResolvedValue({ id: 1, name: "Alpha School" });
         mockRoleFindMany.mockResolvedValue([]);
     });
 
@@ -106,7 +104,6 @@ describe("Phase 5 IAM authorization", () => {
                 id: "ur-1",
                 userId: "user-1",
                 roleId: "role-1",
-                campusId: null,
                 role: {
                     name: "INSTITUTION_ADMIN",
                 },
@@ -126,7 +123,7 @@ describe("Phase 5 IAM authorization", () => {
         const token = generateAccessToken({
             userId: "user-1",
             email: "user@example.com",
-            tenantId: "tenant-1",
+            tenantId: 1,
         });
 
         const response = await request(app)
@@ -144,7 +141,6 @@ describe("Phase 5 IAM authorization", () => {
                 id: "ur-2",
                 userId: "user-1",
                 roleId: "role-2",
-                campusId: null,
                 role: {
                     name: "TEACHER",
                 },
@@ -163,7 +159,7 @@ describe("Phase 5 IAM authorization", () => {
         const token = generateAccessToken({
             userId: "user-1",
             email: "user@example.com",
-            tenantId: "tenant-1",
+            tenantId: 1,
         });
 
         const response = await request(app)
@@ -172,43 +168,6 @@ describe("Phase 5 IAM authorization", () => {
 
         expect(response.status).toBe(403);
         expect(response.body.success).toBe(false);
-    });
-
-    it("denies cross-campus access when the actual resource campus is outside the user's scope", async () => {
-        const tenantDb = {
-            userRole: {
-                findMany: vi.fn().mockResolvedValue([
-                    {
-                        id: "ur-3",
-                        userId: "user-1",
-                        roleId: "role-3",
-                        campusId: "campus-a",
-                        role: { name: "CAMPUS_ADMIN" },
-                    },
-                ]),
-            },
-            role: {
-                findMany: vi.fn().mockResolvedValue([
-                    {
-                        id: "role-3",
-                        name: "CAMPUS_ADMIN",
-                        rolePermissions: [
-                            { permission: { code: "student.read" } },
-                        ],
-                    },
-                ]),
-            },
-        };
-
-        const iamService = new (await import("../modules/iam/iam.service.js")).IamService();
-        const allowed = await iamService.hasPermission({
-            userId: "user-1",
-            tenantDb,
-            permission: "student.read",
-            resourceCampusId: "campus-b",
-        });
-
-        expect(allowed).toBe(false);
     });
 
     it("returns 401 when no token is supplied", async () => {

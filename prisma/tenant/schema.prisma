@@ -13,11 +13,6 @@ enum UserStatus {
     INACTIVE
 }
 
-enum CampusStatus {
-    ACTIVE
-    INACTIVE
-}
-
 enum AcademicYearStatus {
     UPCOMING
     ACTIVE
@@ -80,48 +75,21 @@ model Institution {
     createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
     updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-    campuses Campus[]
-
     @@map("institution")
-}
-
-model Campus {
-    id            String      @id @default(uuid()) @db.Uuid
-    institutionId String      @map("institution_id") @db.Uuid
-    name          String      @db.VarChar(200)
-    code          String      @db.VarChar(100)
-    address       String?     @db.Text
-    status        CampusStatus @default(ACTIVE)
-    createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
-    updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz
-
-    institution     Institution       @relation(fields: [institutionId], references: [id], onDelete: Cascade)
-    userProfiles    UserProfile[]
-    teachers        Teacher[]
-    sections        Section[]
-    enrollments     Enrollment[]
-
-    @@unique([institutionId, code])
-    @@index([institutionId, code])
-    @@index([status])
-    @@map("campuses")
 }
 
 model UserProfile {
     id           String    @id @default(uuid()) @db.Uuid
     userId       String    @unique @map("user_id") @db.Uuid
-    campusId     String?   @map("campus_id") @db.Uuid
     employeeCode String?   @map("employee_code") @db.VarChar(100)
     displayName  String?   @map("display_name") @db.VarChar(200)
     status       UserStatus @default(ACTIVE)
     createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
     updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-    campus    Campus?   @relation(fields: [campusId], references: [id], onDelete: SetNull)
     userRoles UserRole[]
 
     @@index([userId])
-    @@index([campusId])
     @@map("user_profiles")
 }
 
@@ -167,16 +135,14 @@ model UserRole {
     id        String   @id @default(uuid()) @db.Uuid
     userId    String   @map("user_id") @db.Uuid
     roleId    String   @map("role_id") @db.Uuid
-    campusId  String?  @map("campus_id") @db.Uuid
     createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
     user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
     role Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
-    @@unique([userId, roleId, campusId])
+    @@unique([userId, roleId])
     @@index([userId])
     @@index([roleId])
-    @@index([campusId])
     @@map("user_roles")
 }
 
@@ -189,8 +155,9 @@ model AcademicYear {
     createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz
     updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz
 
-    sections   Section[]
-    enrollments Enrollment[]
+    sections        Section[]
+    enrollments     Enrollment[]
+    admissionSerial AdmissionSerial?
 
     @@unique([name])
     @@index([status])
@@ -217,7 +184,6 @@ model Class {
 model Section {
     id             String       @id @default(uuid()) @db.Uuid
     academicYearId String       @map("academic_year_id") @db.Uuid
-    campusId       String       @map("campus_id") @db.Uuid
     classId        String       @map("class_id") @db.Uuid
     name           String       @db.VarChar(100)
     status         SectionStatus @default(ACTIVE)
@@ -225,15 +191,13 @@ model Section {
     updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
     academicYear      AcademicYear       @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-    campus            Campus             @relation(fields: [campusId], references: [id], onDelete: Cascade)
     class             Class              @relation(fields: [classId], references: [id], onDelete: Cascade)
     teacherAssignments TeacherAssignment[]
     attendanceSessions AttendanceSession[]
     enrollments       Enrollment[]
 
-    @@unique([academicYearId, campusId, classId, name])
-    @@index([academicYearId, campusId, classId])
-    @@index([campusId])
+    @@unique([academicYearId, classId, name])
+    @@index([academicYearId, classId])
     @@map("sections")
 }
 
@@ -254,20 +218,15 @@ model Subject {
 model Teacher {
     id           String       @id @default(uuid()) @db.Uuid
     userId       String?      @unique @map("user_id") @db.Uuid
-    campusId     String       @map("campus_id") @db.Uuid
-    employeeCode String       @map("employee_code") @db.VarChar(100)
+    employeeCode String       @unique @map("employee_code") @db.VarChar(100)
     firstName    String       @map("first_name") @db.VarChar(100)
     lastName     String?      @map("last_name") @db.VarChar(100)
     status       TeacherStatus @default(ACTIVE)
     createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz
     updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
-    campus             Campus             @relation(fields: [campusId], references: [id], onDelete: Cascade)
     teacherAssignments TeacherAssignment[]
 
-    @@unique([campusId, employeeCode])
-    @@index([campusId])
-    @@index([employeeCode])
     @@map("teachers")
 }
 
@@ -290,7 +249,7 @@ model TeacherAssignment {
 
 model Student {
     id               String       @id @default(uuid()) @db.Uuid
-    admissionNumber  String       @map("admission_number") @db.VarChar(100)
+    admissionNumber  String       @unique @map("admission_number") @db.VarChar(100)
     firstName        String       @map("first_name") @db.VarChar(100)
     middleName       String?      @map("middle_name") @db.VarChar(100)
     lastName         String?      @map("last_name") @db.VarChar(100)
@@ -306,6 +265,17 @@ model Student {
 
     @@index([status])
     @@map("students")
+}
+
+// One row per academic year in this Tenant DB; lastSerial is incremented atomically on first admissions only.
+model AdmissionSerial {
+    academicYearId String       @id @map("academic_year_id") @db.Uuid
+    lastSerial     Int          @default(0) @map("last_serial") @db.Integer
+    updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+    academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+
+    @@map("admission_serials")
 }
 
 model Guardian {
@@ -330,7 +300,7 @@ model StudentGuardian {
     guardianId String  @map("guardian_id") @db.Uuid
     isPrimary  Boolean @map("is_primary") @db.Boolean
 
-    student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+    student  Student  @relation(fields: [studentId], references: [id], onDelete: Restrict)
     guardian Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
 
     @@id([studentId, guardianId])
@@ -342,32 +312,27 @@ model Enrollment {
     id              String          @id @default(uuid()) @db.Uuid
     studentId       String          @map("student_id") @db.Uuid
     academicYearId String          @map("academic_year_id") @db.Uuid
-    campusId        String          @map("campus_id") @db.Uuid
     classId         String          @map("class_id") @db.Uuid
     sectionId       String          @map("section_id") @db.Uuid
-    admissionNumber String          @map("admission_number") @db.VarChar(100)
     status          EnrollmentStatus @default(ACTIVE)
     enrolledAt      DateTime        @map("enrolled_at") @db.Date
     createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz
     updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz
 
-    student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
-    academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
-    campus       Campus       @relation(fields: [campusId], references: [id], onDelete: Cascade)
-    class        Class        @relation(fields: [classId], references: [id], onDelete: Cascade)
-    section      Section      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+    student      Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+    academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+    class        Class        @relation(fields: [classId], references: [id], onDelete: Restrict)
+    section      Section      @relation(fields: [sectionId], references: [id], onDelete: Restrict)
 
     @@unique([studentId, academicYearId])
-    @@unique([campusId, admissionNumber, academicYearId])
     @@index([studentId, academicYearId])
-    @@index([campusId, sectionId])
+    @@index([sectionId])
     @@map("enrollments")
 }
 
 model AttendanceSession {
     id               String                  @id @default(uuid()) @db.Uuid
     academicYearId   String                  @map("academic_year_id") @db.Uuid
-    campusId         String                  @map("campus_id") @db.Uuid
     sectionId        String                  @map("section_id") @db.Uuid
     attendanceDate   DateTime                @map("attendance_date") @db.Date
     status           AttendanceSessionStatus @default(DRAFT)
@@ -393,7 +358,7 @@ model AttendanceRecord {
     updatedAt           DateTime               @updatedAt @map("updated_at") @db.Timestamptz
 
     attendanceSession AttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Cascade)
-    student           Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+    student           Student           @relation(fields: [studentId], references: [id], onDelete: Restrict)
 
     @@unique([attendanceSessionId, studentId])
     @@index([attendanceSessionId, studentId])

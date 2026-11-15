@@ -24,7 +24,7 @@ export class UserController {
                 throw new AppError("User id is required", 400, "VALIDATION_ERROR");
             }
 
-            const user = await userService.findById(req.tenant.tenantId, userId);
+            const user = await userService.findById(req.tenant.tenantId, userId, req.tenantDb);
             logger.info("User fetched", { ip: req.ip, userId, tenantId: req.tenant.tenantId });
             return res.status(200).json({ success: true, data: user });
         } catch (error) {
@@ -41,14 +41,15 @@ export class UserController {
             const search = typeof req.query.search === "string" ? req.query.search : undefined;
             const page = Number(req.query.page ?? 1);
             const pageSize = Number(req.query.pageSize ?? 20);
-            const campusId = typeof req.query.campusId === "string" ? req.query.campusId : undefined;
             const status = typeof req.query.status === "string" ? req.query.status : undefined;
+            if (status && !["ACTIVE", "INACTIVE", "LOCKED"].includes(status)) {
+                throw new AppError("User status filter is invalid", 400, "VALIDATION_ERROR");
+            }
 
             const listOptions: {
                 search?: string;
                 page?: number;
                 pageSize?: number;
-                campusId?: string;
                 status?: string;
             } = {
                 page,
@@ -58,14 +59,11 @@ export class UserController {
             if (search) {
                 listOptions.search = search;
             }
-            if (campusId) {
-                listOptions.campusId = campusId;
-            }
             if (status) {
                 listOptions.status = status;
             }
 
-            const result = await userService.findAll(req.tenant.tenantId, listOptions);
+            const result = await userService.findAll(req.tenant.tenantId, listOptions, req.tenantDb);
 
             logger.info("Users listed", { ip: req.ip, tenantId: req.tenant.tenantId });
             return res.status(200).json({ success: true, data: result.items, meta: {
@@ -84,10 +82,10 @@ export class UserController {
                 throw new AppError("Tenant context is required", 401, "UNAUTHORIZED");
             }
 
-            const { email, firstName, lastName, campusId, role, password } = req.body ?? {};
+            const { email, firstName, lastName, role, password } = req.body ?? {};
 
-            if (!email || !firstName || !campusId || !role) {
-                throw new AppError("Email, first name, campus, and role are required", 400, "VALIDATION_ERROR");
+            if (!email || !firstName || !role) {
+                throw new AppError("Email, first name, and role are required", 400, "VALIDATION_ERROR");
             }
 
             const createdUser = await userService.create(
@@ -97,10 +95,10 @@ export class UserController {
                     email,
                     firstName,
                     lastName,
-                    campusId,
                     role,
                     password,
                 },
+                req.tenantDb,
             );
 
             logger.info("User created", { ip: req.ip, tenantId: req.tenant.tenantId, userId: createdUser.id });
@@ -128,7 +126,6 @@ export class UserController {
                 firstName?: string;
                 lastName?: string;
                 status?: string;
-                campusId?: string;
                 role?: string;
             };
 
@@ -137,6 +134,7 @@ export class UserController {
                 req.user?.userId ?? req.auth?.userId ?? "system",
                 userId,
                 payload,
+                req.tenantDb,
             );
 
             return res.status(200).json({ success: true, data: updatedUser });
@@ -159,7 +157,7 @@ export class UserController {
                 throw new AppError("User id is required", 400, "VALIDATION_ERROR");
             }
 
-            const roles = await userService.getUserRoles(req.tenant.tenantId, userId);
+            const roles = await userService.getUserRoles(req.tenant.tenantId, userId, req.tenantDb);
             return res.status(200).json({ success: true, data: roles });
         } catch (error) {
             return next(error);
@@ -180,7 +178,7 @@ export class UserController {
                 throw new AppError("User id is required", 400, "VALIDATION_ERROR");
             }
 
-            const { role, campusId } = req.body ?? {};
+            const { role } = req.body ?? {};
             if (!role) {
                 throw new AppError("Role is required", 400, "VALIDATION_ERROR");
             }
@@ -189,7 +187,8 @@ export class UserController {
                 req.tenant.tenantId,
                 req.user?.userId ?? req.auth?.userId ?? "system",
                 userId,
-                { role, campusId: campusId ?? null },
+                { role },
+                req.tenantDb,
             );
 
             return res.status(201).json({ success: true, data: assignment });
@@ -220,6 +219,7 @@ export class UserController {
                 req.user?.userId ?? req.auth?.userId ?? "system",
                 userId,
                 roleId,
+                req.tenantDb,
             );
 
             return res.status(200).json({ success: true, data: removed });
@@ -242,7 +242,7 @@ export class UserController {
                 throw new AppError("User id is required", 400, "VALIDATION_ERROR");
             }
 
-            const result = await userService.activateUser(req.tenant.tenantId, req.user?.userId ?? req.auth?.userId ?? "system", userId);
+            const result = await userService.activateUser(req.tenant.tenantId, req.user?.userId ?? req.auth?.userId ?? "system", userId, req.tenantDb);
             return res.status(200).json({ success: true, data: result });
         } catch (error) {
             return next(error);
@@ -263,7 +263,7 @@ export class UserController {
                 throw new AppError("User id is required", 400, "VALIDATION_ERROR");
             }
 
-            const result = await userService.deactivateUser(req.tenant.tenantId, req.user?.userId ?? req.auth?.userId ?? "system", userId);
+            const result = await userService.deactivateUser(req.tenant.tenantId, req.user?.userId ?? req.auth?.userId ?? "system", userId, req.tenantDb);
             return res.status(200).json({ success: true, data: result });
         } catch (error) {
             return next(error);

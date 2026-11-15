@@ -10,4 +10,5 @@ router.get("/students/:studentId", ...context, requirePermission("student.read")
 router.post("/students", ...context, requirePermission("student.create"), controller.create.bind(controller));
 router.patch("/students/:studentId", ...context, requirePermission("student.update"), controller.update.bind(controller));
 router.post("/students/:studentId/enrollments", ...context, requirePermission("student.create"), controller.enrollment.bind(controller));
+router.post("/students/:studentId/guardians", ...context, requirePermission("student.update"), controller.addGuardian.bind(controller));
 export default router;

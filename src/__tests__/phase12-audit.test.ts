@@ -47,14 +47,14 @@ describe("Phase 12 audit logs", () => {
     describe("Attendance module audit integration", () => {
         const actor = "user-1";
         const session = {
-            id: "session-1", academicYearId: "year-1", campusId: "campus-1", sectionId: "section-1",
+            id: "session-1", academicYearId: "year-1", sectionId: "section-1",
             attendanceDate: new Date("2026-09-19T00:00:00.000Z"), status: "DRAFT", createdByUserId: actor,
         };
 
         const buildDb = () => {
             const db: Record<string, unknown> = {
-                userProfile: { findUnique: vi.fn().mockResolvedValue({ userRoles: [{ campusId: null, role: { name: "INSTITUTION_ADMIN" } }] }) },
-                section: { findUnique: vi.fn().mockResolvedValue({ id: "section-1", campusId: "campus-1", academicYearId: "year-1" }) },
+                userProfile: { findUnique: vi.fn().mockResolvedValue({ userRoles: [{ role: { name: "INSTITUTION_ADMIN" } }] }) },
+                section: { findUnique: vi.fn().mockResolvedValue({ id: "section-1", academicYearId: "year-1" }) },
                 enrollment: { count: vi.fn().mockResolvedValue(1) },
                 attendanceRecord: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn().mockResolvedValue({}) },
                 attendanceSession: {

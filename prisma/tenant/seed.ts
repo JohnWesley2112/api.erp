@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { PrismaClient } from "../../node_modules/.prisma/tenant-client";
+import { DEFAULT_ROLE_PERMISSIONS } from "../../src/modules/iam/iam.service.js";
 
 // const prisma = new PrismaClient({
 //     datasourceUrl: process.env.TENANT_DATABASE_URL,
@@ -29,7 +30,7 @@ async function main() {
 
     const roles = [
         { name: "INSTITUTION_ADMIN", description: "Institution-wide administration" },
-        { name: "CAMPUS_ADMIN", description: "Campus-scoped administration" },
+        { name: "CAMPUS_ADMIN", description: "Tenant (campus) administration" },
         { name: "TEACHER", description: "Teacher access to assigned academic resources" },
     ] as const;
 
@@ -44,8 +45,6 @@ async function main() {
         { code: "teacher.update", description: "Update teacher records" },
         { code: "academic.read", description: "Read academic data" },
         { code: "academic.manage", description: "Manage academic data" },
-        { code: "campus.read", description: "Read campus records" },
-        { code: "campus.manage", description: "Manage campus records" },
         { code: "user.read", description: "Read user data" },
         { code: "user.manage", description: "Manage user data" },
         { code: "role.read", description: "Read role data" },
@@ -74,71 +73,42 @@ async function main() {
         createdRoles.push(record);
     }
 
-    // const matrices: Record<string, string[]> = {
-    //     INSTITUTION_ADMIN: [
-    //         "student.read",
-    //         "student.create",
-    //         "student.update",
-    //         "teacher.read",
-    //         "teacher.create",
-    //         "teacher.update",
-    //         "academic.read",
-    //         "academic.manage",
-    //         "campus.read",
-    //         "campus.manage",
-    //         "user.read",
-    //         "user.manage",
-    //         "role.read",
-    //         "role.manage",
-    //         "attendance.read",
-    //         "attendance.mark",
-    //         "attendance.submit",
-    //         "audit.read",
-    //     ],
-    //     CAMPUS_ADMIN: [
-    //         "student.read",
-    //         "student.create",
-    //         "student.update",
-    //         "teacher.read",
-    //         "academic.read",
-    //         "campus.read",
-    //         "user.read",
-    //         "attendance.read",
-    //         "attendance.mark",
-    //         "attendance.submit",
-    //     ],
-    //     TEACHER: [
-    //         "student.read",
-    //         "teacher.read",
-    //         "academic.read",
-    //         "campus.read",
-    //         "attendance.read",
-    //         "attendance.mark",
-    //         "attendance.submit",
-    //     ],
-    // };
+    const permissionRecords = await prisma.permission.findMany({
+        where: { code: { in: permissions.map((permission) => permission.code) } },
+        select: { id: true, code: true },
+    });
+    const permissionIdsByCode = new Map(
+        permissionRecords.map((permission) => [permission.code, permission.id]),
+    );
 
-    const allPermissionCodes = permissions.map((permission) => permission.code);
+    await prisma.$transaction(async (tx) => {
+        for (const role of createdRoles) {
+            const permissionCodes = DEFAULT_ROLE_PERMISSIONS[role.name] ?? [];
+            const permissionIds = permissionCodes.map((code) => {
+                const permissionId = permissionIdsByCode.get(code);
+                if (!permissionId) {
+                    throw new Error(`Seeded permission ${code} was not found`);
+                }
 
-    const matrices: Record<string, string[]> = {
-        INSTITUTION_ADMIN: allPermissionCodes,
-        CAMPUS_ADMIN: allPermissionCodes,
-        TEACHER: allPermissionCodes,
-    };
-
-    for (const role of createdRoles) {
-        const permissionCodes = matrices[role.name] ?? [];
-        for (const code of permissionCodes) {
-            const permission = await prisma.permission.findUnique({ where: { code } });
-            if (!permission) continue;
-
-            await prisma.rolePermission.upsert({
-                where: { roleId_permissionId: { roleId: role.id, permissionId: permission.id } },
-                update: {},
-                create: { roleId: role.id, permissionId: permission.id },
+                return permissionId;
             });
+
+            await tx.rolePermission.deleteMany({
+                where: {
+                    roleId: role.id,
+                    permissionId: { notIn: permissionIds },
+                },
+            });
+
+            for (const permissionId of permissionIds) {
+                await tx.rolePermission.upsert({
+                    where: { roleId_permissionId: { roleId: role.id, permissionId } },
+                    update: {},
+                    create: { roleId: role.id, permissionId },
+                });
+            }
         }
-    }
+    });
 }
 
 main()

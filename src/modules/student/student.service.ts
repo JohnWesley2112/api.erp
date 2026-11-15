@@ -2,6 +2,9 @@
 import { Prisma } from "../../../node_modules/.prisma/tenant-client/index.js";
 import { AppError } from "../../errors/app.error.js";
 
+const STUDENT_STATUSES = ["ACTIVE", "INACTIVE", "GRADUATED", "TRANSFERRED"];
+const MAX_SERIAL = 999_999;
+
 const text = (value: unknown, field: string, maxLength: number, required = false) => {
     if (value === undefined || value === null) {
         if (required) throw new AppError(`${field} is required`, 400, "VALIDATION_ERROR");
@@ -20,91 +23,154 @@ const date = (value: unknown, field: string) => {
     return new Date(value);
 };
 
+export const formatAdmissionNumber = (academicYear: number, tenantId: number, serial: number) =>
+    `${academicYear}${String(tenantId).padStart(3, "0")}${String(serial).padStart(6, "0")}`;
+
+const guardianSelect = { id: true, firstName: true, lastName: true, phone: true, email: true, relationship: true };
+
 const studentSelect = {
     id: true, admissionNumber: true, firstName: true, middleName: true, lastName: true,
     dateOfBirth: true, gender: true, status: true, createdAt: true, updatedAt: true,
     enrollments: {
         orderBy: { enrolledAt: "desc" },
         include: {
-            academicYear: { select: { id: true, name: true } }, campus: { select: { id: true, name: true, code: true } },
+            academicYear: { select: { id: true, name: true } },
             class: { select: { id: true, name: true, code: true } }, section: { select: { id: true, name: true } },
         },
     },
+    studentGuardians: { select: { isPrimary: true, guardian: { select: guardianSelect } } },
 };
 
+const isUniqueViolation = (error: any, field?: string) =>
+    error?.code === "P2002" && (!field || JSON.stringify(error?.meta?.target ?? "").includes(field));
+
 export class StudentService {
-    private async campusScope(db: any, actorUserId: string) {
-        const profile = await db.userProfile.findUnique({ where: { userId: actorUserId }, select: { userRoles: { select: { campusId: true, role: { select: { name: true } } } } } });
+    // undefined = whole Tenant; array = section ids a Teacher-only actor is assigned to.
+    private async sectionScope(db: any, actorUserId: string): Promise<string[] | undefined> {
+        const profile = await db.userProfile.findUnique({ where: { userId: actorUserId }, select: { userRoles: { select: { role: { select: { name: true } } } } } });
         if (!profile) throw new AppError("User profile not found in this tenant", 404, "NOT_FOUND");
-        if (profile.userRoles.some((item: any) => item.role?.name === "INSTITUTION_ADMIN")) return undefined;
-        const ids = profile.userRoles.filter((item: any) => item.role?.name === "CAMPUS_ADMIN" || item.role?.name === "TEACHER").map((item: any) => item.campusId).filter(Boolean);
-        return ids.length ? ids : ["__no_campus_access__"];
+        const names = profile.userRoles.map((item: any) => item.role?.name);
+        if (names.includes("INSTITUTION_ADMIN") || names.includes("CAMPUS_ADMIN")) return undefined;
+        const teacher = await db.teacher.findUnique({ where: { userId: actorUserId }, select: { id: true, status: true } });
+        if (!teacher || teacher.status !== "ACTIVE") return [];
+        const assignments = await db.teacherAssignment.findMany({ where: { teacherId: teacher.id }, select: { sectionId: true } });
+        return assignments.map((item: any) => item.sectionId);
     }
 
     private async scopedStudent(db: any, actorUserId: string, studentId: string) {
-        const campusIds = await this.campusScope(db, actorUserId);
+        const sectionIds = await this.sectionScope(db, actorUserId);
         const student = await db.student.findUnique({ where: { id: studentId }, select: studentSelect }) as any;
         if (!student) throw new AppError("Student not found in this tenant", 404, "NOT_FOUND");
-        if (campusIds && !student.enrollments.some((enrollment: any) => campusIds.includes(enrollment.campusId))) throw new AppError("Student access denied", 403, "FORBIDDEN");
-        if (campusIds) student.enrollments = student.enrollments.filter((enrollment: any) => campusIds.includes(enrollment.campusId));
+        if (sectionIds) {
+            student.enrollments = student.enrollments.filter((enrollment: any) => sectionIds.includes(enrollment.sectionId));
+            if (!student.enrollments.length) throw new AppError("Student access denied", 403, "FORBIDDEN");
+        }
         return student;
     }
 
-    private async validateEnrollment(db: any, actorUserId: string, input: Record<string, unknown>, studentId?: string) {
+    private async validateEnrollment(db: any, input: Record<string, unknown>, studentId?: string) {
         const academicYearId = text(input.academicYearId, "Academic year id", 100, true)!;
-        const campusId = text(input.campusId, "Campus id", 100, true)!;
         const classId = text(input.classId, "Class id", 100, true)!;
         const sectionId = text(input.sectionId, "Section id", 100, true)!;
-        const admissionNumber = text(input.admissionNumber, "Admission number", 100, true)!.toUpperCase();
         const enrolledAt = date(input.enrolledAt ?? new Date().toISOString(), "Enrolled at")!;
-        const campusIds = await this.campusScope(db, actorUserId);
-        if (campusIds && !campusIds.includes(campusId)) throw new AppError("Campus access denied", 403, "FORBIDDEN");
-        const [year, campus, academicClass, section] = await Promise.all([
-            db.academicYear.findUnique({ where: { id: academicYearId }, select: { id: true } }),
-            db.campus.findUnique({ where: { id: campusId }, select: { id: true } }),
+        const [year, academicClass, section] = await Promise.all([
+            db.academicYear.findUnique({ where: { id: academicYearId }, select: { id: true, startDate: true } }),
             db.class.findUnique({ where: { id: classId }, select: { id: true } }),
-            db.section.findUnique({ where: { id: sectionId }, select: { id: true, academicYearId: true, campusId: true, classId: true } }),
+            db.section.findUnique({ where: { id: sectionId }, select: { id: true, academicYearId: true, classId: true } }),
         ]);
         if (!year) throw new AppError("Academic year not found in this tenant", 404, "NOT_FOUND");
-        if (!campus) throw new AppError("Campus not found in this tenant", 404, "NOT_FOUND");
         if (!academicClass) throw new AppError("Class not found in this tenant", 404, "NOT_FOUND");
         if (!section) throw new AppError("Section not found in this tenant", 404, "NOT_FOUND");
-        if (section.academicYearId !== academicYearId || section.campusId !== campusId || section.classId !== classId) throw new AppError("Section does not match the academic year, campus, and class", 400, "VALIDATION_ERROR");
-        if (await db.enrollment.findFirst({ where: { campusId, academicYearId, admissionNumber }, select: { id: true } })) throw new AppError("This admission number is already enrolled on this campus for the academic year", 409, "DUPLICATE_RESOURCE");
+        if (section.academicYearId !== academicYearId || section.classId !== classId) throw new AppError("Section does not match the academic year and class", 400, "VALIDATION_ERROR");
         if (studentId && await db.enrollment.findUnique({ where: { studentId_academicYearId: { studentId, academicYearId } }, select: { id: true } })) throw new AppError("This student is already enrolled for the academic year", 409, "DUPLICATE_RESOURCE");
-        return { academicYearId, campusId, classId, sectionId, admissionNumber, enrolledAt };
+        return { academicYearId, classId, sectionId, enrolledAt, academicYearStart: year.startDate as Date };
+    }
+
+    private parseGuardian(value: unknown, index = 0) {
+        if (typeof value !== "object" || value === null) throw new AppError(`guardians[${index}] must be an object`, 400, "VALIDATION_ERROR");
+        const input = value as Record<string, unknown>;
+        if (input.isPrimary !== undefined && typeof input.isPrimary !== "boolean") throw new AppError(`guardians[${index}].isPrimary must be a boolean`, 400, "VALIDATION_ERROR");
+        return {
+            firstName: text(input.firstName, `guardians[${index}].firstName`, 100, true)!,
+            lastName: text(input.lastName, `guardians[${index}].lastName`, 100) ?? null,
+            phone: text(input.phone, `guardians[${index}].phone`, 50) ?? null,
+            email: text(input.email, `guardians[${index}].email`, 255) ?? null,
+            relationship: text(input.relationship, `guardians[${index}].relationship`, 100) ?? null,
+            isPrimary: input.isPrimary === true,
+        };
+    }
+
+    private parseGuardians(value: unknown) {
+        if (value === undefined || value === null) return [];
+        if (!Array.isArray(value)) throw new AppError("guardians must be an array", 400, "VALIDATION_ERROR");
+        const guardians = value.map((item, index) => this.parseGuardian(item, index));
+        if (guardians.filter((guardian) => guardian.isPrimary).length > 1) throw new AppError("Only one guardian can be primary", 400, "VALIDATION_ERROR");
+        return guardians;
+    }
+
+    private async attachGuardian(tx: any, studentId: string, guardian: ReturnType<StudentService["parseGuardian"]>) {
+        const { isPrimary, ...data } = guardian;
+        const created = await tx.guardian.create({ data, select: { id: true } });
+        await tx.studentGuardian.create({ data: { studentId, guardianId: created.id, isPrimary } });
+        return created.id as string;
     }
 
     async listStudents(db: any, actorUserId: string, options: Record<string, unknown> = {}) {
-        const page = Math.max(Number(options.page ?? 1), 1); const pageSize = Math.min(Math.max(Number(options.pageSize ?? 20), 1), 100); const campusIds = await this.campusScope(db, actorUserId);
+        const page = Math.max(Number(options.page ?? 1), 1); const pageSize = Math.min(Math.max(Number(options.pageSize ?? 20), 1), 100);
+        const sectionIds = await this.sectionScope(db, actorUserId);
         const enrollmentWhere: any = {};
-        if (campusIds) enrollmentWhere.campusId = { in: campusIds };
-        for (const field of ["campusId", "academicYearId", "classId", "sectionId"]) if (typeof options[field] === "string") enrollmentWhere[field] = options[field];
-        if (typeof options.status === "string") enrollmentWhere.status = options.status.toUpperCase();
-        const where: any = { enrollments: { some: enrollmentWhere } };
+        if (sectionIds) enrollmentWhere.sectionId = { in: sectionIds };
+        for (const field of ["academicYearId", "classId", "sectionId"]) {
+            const value = options[field];
+            if (typeof value !== "string" || !value) continue;
+            enrollmentWhere[field] = field === "sectionId" && sectionIds ? { in: sectionIds.filter((id) => id === value) } : value;
+        }
+        const where: any = Object.keys(enrollmentWhere).length ? { enrollments: { some: enrollmentWhere } } : {};
+        if (typeof options.status === "string" && options.status) where.status = options.status.toUpperCase();
         const search = typeof options.search === "string" ? options.search.trim() : "";
         if (search) where.OR = ["firstName", "middleName", "lastName", "admissionNumber"].map((field) => ({ [field]: { contains: search, mode: "insensitive" } }));
         const [total, items] = await Promise.all([db.student.count({ where }), db.student.findMany({ where, orderBy: [{ lastName: "asc" }, { firstName: "asc" }], skip: (page - 1) * pageSize, take: pageSize, select: studentSelect })]);
-        if (campusIds) for (const item of items) item.enrollments = item.enrollments.filter((enrollment: any) => campusIds.includes(enrollment.campusId));
+        if (sectionIds) for (const item of items) item.enrollments = item.enrollments.filter((enrollment: any) => sectionIds.includes(enrollment.sectionId));
         return { items, total, page, pageSize };
     }
 
     async getStudent(db: any, actorUserId: string, studentId: string) { return this.scopedStudent(db, actorUserId, studentId); }
 
-    async createStudent(db: any, actorUserId: string, input: Record<string, unknown>) {
-        const admissionNumber = text(input.admissionNumber, "Admission number", 100, true)!.toUpperCase(); const firstName = text(input.firstName, "First name", 100, true)!;
-        const data = { admissionNumber, firstName, middleName: text(input.middleName, "Middle name", 100) ?? null, lastName: text(input.lastName, "Last name", 100) ?? null, dateOfBirth: date(input.dateOfBirth, "Date of birth") ?? null, gender: text(input.gender, "Gender", 50) ?? null, status: (text(input.status, "Status", 20) ?? "ACTIVE") };
-        if (!["ACTIVE", "INACTIVE", "GRADUATED", "TRANSFERRED"].includes(data.status)) throw new AppError("Invalid student status", 400, "VALIDATION_ERROR");
-        const enrollment = await this.validateEnrollment(db, actorUserId, input);
-        return db.$transaction(async (tx: any) => {
-            const student = await tx.student.create({ data, select: { id: true } });
-            await tx.enrollment.create({ data: { ...enrollment, studentId: student.id, status: "ACTIVE" }, select: { id: true } });
-            await tx.auditLog.create({ data: { actorUserId, action: "student.created", entityType: "student", entityId: student.id, metadata: { studentId: student.id, enrollment: { academicYearId: enrollment.academicYearId, campusId: enrollment.campusId } } as Prisma.InputJsonValue } });
-            return this.scopedStudent(tx, actorUserId, student.id);
-        });
+    // First-ever admission: Student + first Enrollment + guardians + audit commit together, and the serial is only consumed on commit.
+    async createStudent(db: any, tenantId: number, actorUserId: string, input: Record<string, unknown>) {
+        if (!Number.isSafeInteger(tenantId) || tenantId <= 0) throw new AppError("Tenant context is required", 401, "UNAUTHORIZED");
+        const firstName = text(input.firstName, "First name", 100, true)!;
+        const status = text(input.status, "Status", 20) ?? "ACTIVE";
+        if (!STUDENT_STATUSES.includes(status)) throw new AppError("Invalid student status", 400, "VALIDATION_ERROR");
+        const data = { firstName, middleName: text(input.middleName, "Middle name", 100) ?? null, lastName: text(input.lastName, "Last name", 100) ?? null, dateOfBirth: date(input.dateOfBirth, "Date of birth") ?? null, gender: text(input.gender, "Gender", 50) ?? null, status };
+        const guardians = this.parseGuardians(input.guardians);
+        const { academicYearStart, ...enrollment } = await this.validateEnrollment(db, input);
+        const admissionYear = academicYearStart.getUTCFullYear();
+
+        try {
+            return await db.$transaction(async (tx: any) => {
+                const counter = await tx.admissionSerial.upsert({
+                    where: { academicYearId: enrollment.academicYearId },
+                    create: { academicYearId: enrollment.academicYearId, lastSerial: 1 },
+                    update: { lastSerial: { increment: 1 } },
+                    select: { lastSerial: true },
+                });
+                if (counter.lastSerial > MAX_SERIAL) throw new AppError("Admission serial capacity for this academic year is exhausted", 409, "ADMISSION_SERIAL_EXHAUSTED");
+                const admissionNumber = formatAdmissionNumber(admissionYear, tenantId, counter.lastSerial);
+                const student = await tx.student.create({ data: { ...data, admissionNumber }, select: { id: true } });
+                const created = await tx.enrollment.create({ data: { ...enrollment, studentId: student.id, status: "ACTIVE" }, select: { id: true } });
+                for (const guardian of guardians) await this.attachGuardian(tx, student.id, guardian);
+                await tx.auditLog.create({ data: { actorUserId, action: "student.create", entityType: "Student", entityId: student.id, metadata: { studentId: student.id, admissionNumber, enrollmentId: created.id, academicYearId: enrollment.academicYearId } as Prisma.InputJsonValue } });
+                return this.scopedStudent(tx, actorUserId, student.id);
+            });
+        } catch (error) {
+            if (isUniqueViolation(error, "admission_number")) throw new AppError("This admission number already exists", 409, "DUPLICATE_RESOURCE");
+            throw error;
+        }
     }
 
     async updateStudent(db: any, actorUserId: string, studentId: string, input: Record<string, unknown>) {
+        if (Object.prototype.hasOwnProperty.call(input, "admissionNumber")) throw new AppError("The admission number is permanent and cannot be changed", 400, "VALIDATION_ERROR");
         await this.scopedStudent(db, actorUserId, studentId); const data: Record<string, unknown> = {};
         if (Object.prototype.hasOwnProperty.call(input, "firstName")) data.firstName = text(input.firstName, "First name", 100, true);
         if (Object.prototype.hasOwnProperty.call(input, "middleName")) data.middleName = text(input.middleName, "Middle name", 100) ?? null;
@@ -113,16 +179,34 @@ export class StudentService {
         if (Object.prototype.hasOwnProperty.call(input, "gender")) data.gender = text(input.gender, "Gender", 50) ?? null;
         if (Object.prototype.hasOwnProperty.call(input, "status")) {
             const nextStatus = text(input.status, "Status", 20);
-            if (!nextStatus || !["ACTIVE", "INACTIVE", "GRADUATED", "TRANSFERRED"].includes(nextStatus)) throw new AppError("Invalid student status", 400, "VALIDATION_ERROR");
+            if (!nextStatus || !STUDENT_STATUSES.includes(nextStatus)) throw new AppError("Invalid student status", 400, "VALIDATION_ERROR");
             data.status = nextStatus;
         }
         if (!Object.keys(data).length) throw new AppError("No valid student fields were provided for update", 400, "VALIDATION_ERROR");
-        await db.student.update({ where: { id: studentId }, data }); await db.auditLog.create({ data: { actorUserId, action: "student.updated", entityType: "student", entityId: studentId, metadata: { studentId, changes: Object.keys(data) } as Prisma.InputJsonValue } });
+        await db.student.update({ where: { id: studentId }, data }); await db.auditLog.create({ data: { actorUserId, action: "student.updated", entityType: "Student", entityId: studentId, metadata: { studentId, changes: Object.keys(data) } as Prisma.InputJsonValue } });
         return this.scopedStudent(db, actorUserId, studentId);
     }
 
+    // Later-year placement; keeps the Student's permanent Admission Number and never touches the serial counter.
     async createEnrollment(db: any, actorUserId: string, studentId: string, input: Record<string, unknown>) {
-        await this.scopedStudent(db, actorUserId, studentId); const enrollment = await this.validateEnrollment(db, actorUserId, input, studentId);
-        return db.$transaction(async (tx: any) => { const result = await tx.enrollment.create({ data: { ...enrollment, studentId, status: "ACTIVE" }, include: { academicYear: { select: { id: true, name: true } }, campus: { select: { id: true, name: true, code: true } }, class: { select: { id: true, name: true, code: true } }, section: { select: { id: true, name: true } } } }); await tx.auditLog.create({ data: { actorUserId, action: "student.enrollment.created", entityType: "enrollment", entityId: result.id, metadata: { studentId, enrollmentId: result.id } as Prisma.InputJsonValue } }); return result; });
+        await this.scopedStudent(db, actorUserId, studentId);
+        const validated = await this.validateEnrollment(db, input, studentId);
+        const enrollment = { academicYearId: validated.academicYearId, classId: validated.classId, sectionId: validated.sectionId, enrolledAt: validated.enrolledAt };
+        return db.$transaction(async (tx: any) => {
+            const result = await tx.enrollment.create({ data: { ...enrollment, studentId, status: "ACTIVE" }, include: { academicYear: { select: { id: true, name: true } }, class: { select: { id: true, name: true, code: true } }, section: { select: { id: true, name: true } } } });
+            await tx.auditLog.create({ data: { actorUserId, action: "student.enrollment.created", entityType: "enrollment", entityId: result.id, metadata: { studentId, enrollmentId: result.id } as Prisma.InputJsonValue } });
+            return result;
+        });
+    }
+
+    async addGuardian(db: any, actorUserId: string, studentId: string, input: Record<string, unknown>) {
+        await this.scopedStudent(db, actorUserId, studentId);
+        const guardian = this.parseGuardian(input);
+        return db.$transaction(async (tx: any) => {
+            if (guardian.isPrimary) await tx.studentGuardian.updateMany({ where: { studentId, isPrimary: true }, data: { isPrimary: false } });
+            const guardianId = await this.attachGuardian(tx, studentId, guardian);
+            await tx.auditLog.create({ data: { actorUserId, action: "student.guardian.added", entityType: "Student", entityId: studentId, metadata: { studentId, guardianId } as Prisma.InputJsonValue } });
+            return this.scopedStudent(tx, actorUserId, studentId);
+        });
     }
 }

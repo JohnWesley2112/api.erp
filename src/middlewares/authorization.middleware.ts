@@ -5,10 +5,7 @@ import { setRequestDiagnosticContext } from "../observability/request-context.js
 
 const iamService = new IamService();
 
-export const requirePermission = (
-    permission: string,
-    resourceResolver?: (req: AppRequest) => unknown | Promise<unknown>,
-) => {
+export const requirePermission = (permission: string) => {
     return async (req: AppRequest, _res: AppResponse, next: AppNextFunction) => {
         try {
             setRequestDiagnosticContext(req, { stage: "RBAC_PERMISSION_RESOLUTION", operation: `resolve permission ${permission}` });
@@ -20,20 +17,11 @@ export const requirePermission = (
                 throw new AppError("Tenant context is required", 401, "UNAUTHORIZED");
             }
 
-            const resource = resourceResolver ? await resourceResolver(req) : null;
-            const resourceCampusId = typeof resource === "object" && resource !== null
-                ? ((resource as { campusId?: string | null }).campusId ??
-                    (resource as { campus?: { id?: string | null } }).campus?.id ??
-                    (resource as { section?: { campusId?: string | null } }).section?.campusId ??
-                    (resource as { enrollment?: { campusId?: string | null } }).enrollment?.campusId ?? null)
-                : null;
-
             setRequestDiagnosticContext(req, { stage: "RBAC_PERMISSION_CHECK", operation: `check permission ${permission}` });
             const allowed = await iamService.hasPermission({
                 userId: req.user.userId,
                 tenantDb: req.tenantDb,
                 permission,
-                resourceCampusId,
             });
 
             if (!allowed) {

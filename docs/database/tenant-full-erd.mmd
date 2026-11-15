@@ -1,0 +1,209 @@
+erDiagram
+    institution {
+        String id PK
+        String name
+        String code UK
+        String email
+        String phone
+        String address
+        DateTime created_at
+        DateTime updated_at
+    }
+    user_profiles {
+        String id PK
+        String user_id UK
+        String employee_code
+        String display_name
+        UserStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    roles {
+        String id PK
+        String name UK
+        String description
+        DateTime created_at
+        DateTime updated_at
+    }
+    permissions {
+        String id PK
+        String code UK
+        String description
+        DateTime created_at
+        DateTime updated_at
+    }
+    role_permissions {
+        String role_id PK, FK
+        String permission_id PK, FK
+    }
+    user_roles {
+        String id PK
+        String user_id FK
+        String role_id FK
+        DateTime created_at
+    }
+    academic_years {
+        String id PK
+        String name UK
+        DateTime start_date
+        DateTime end_date
+        AcademicYearStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    classes {
+        String id PK
+        String name
+        String code UK
+        Int display_order
+        ClassStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    sections {
+        String id PK
+        String academic_year_id FK
+        String class_id FK
+        String name
+        SectionStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    subjects {
+        String id PK
+        String name
+        String code UK
+        SubjectStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    teachers {
+        String id PK
+        String user_id UK
+        String employee_code UK
+        String first_name
+        String last_name
+        TeacherStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    teacher_assignments {
+        String id PK
+        String teacher_id FK
+        String subject_id FK
+        String section_id FK
+        DateTime created_at
+    }
+    students {
+        String id PK
+        String admission_number UK
+        String first_name
+        String middle_name
+        String last_name
+        DateTime date_of_birth
+        String gender
+        StudentStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    admission_serials {
+        String academic_year_id PK, FK
+        Int last_serial
+        DateTime updated_at
+    }
+    guardians {
+        String id PK
+        String first_name
+        String last_name
+        String phone
+        String email
+        String relationship
+        DateTime created_at
+        DateTime updated_at
+    }
+    student_guardians {
+        String student_id PK, FK
+        String guardian_id PK, FK
+        Boolean is_primary
+    }
+    enrollments {
+        String id PK
+        String student_id FK
+        String academic_year_id FK
+        String class_id FK
+        String section_id FK
+        EnrollmentStatus status
+        DateTime enrolled_at
+        DateTime created_at
+        DateTime updated_at
+    }
+    attendance_sessions {
+        String id PK
+        String academic_year_id
+        String section_id FK
+        DateTime attendance_date
+        AttendanceSessionStatus status
+        String created_by_user_id
+        DateTime created_at
+        DateTime updated_at
+    }
+    attendance_records {
+        String id PK
+        String attendance_session_id FK
+        String student_id FK
+        AttendanceRecordStatus status
+        String remarks
+        DateTime created_at
+        DateTime updated_at
+    }
+    audit_logs {
+        String id PK
+        String actor_user_id
+        String action
+        String entity_type
+        String entity_id
+        Json metadata
+        DateTime created_at
+    }
+
+    user_profiles ||--o{ user_roles : "user_id"
+    roles ||--o{ user_roles : "role_id"
+    roles ||--o{ role_permissions : "role_id"
+    permissions ||--o{ role_permissions : "permission_id"
+    academic_years ||--o{ sections : "academic_year_id"
+    classes ||--o{ sections : "class_id"
+    teachers ||--o{ teacher_assignments : "teacher_id"
+    subjects ||--o{ teacher_assignments : "subject_id"
+    sections ||--o{ teacher_assignments : "section_id"
+    academic_years ||--o| admission_serials : "academic_year_id"
+    students ||--o{ student_guardians : "student_id"
+    guardians ||--o{ student_guardians : "guardian_id"
+    students ||--o{ enrollments : "student_id"
+    academic_years ||--o{ enrollments : "academic_year_id"
+    classes ||--o{ enrollments : "class_id"
+    sections ||--o{ enrollments : "section_id"
+    sections ||--o{ attendance_sessions : "section_id"
+    attendance_sessions ||--o{ attendance_records : "attendance_session_id"
+    students ||--o{ attendance_records : "student_id"
+
+%% UK constraints:
+%% institution(code); user_profiles(user_id); roles(name); permissions(code)
+%% user_roles(user_id, role_id); academic_years(name); classes(code)
+%% sections(academic_year_id, class_id, name); subjects(code)
+%% teachers(user_id nullable, employee_code)
+%% teacher_assignments(teacher_id, subject_id, section_id)
+%% students(admission_number); enrollments(student_id, academic_year_id)
+%% attendance_sessions(section_id, attendance_date)
+%% attendance_records(attendance_session_id, student_id)
+%% No cross-database relations are represented here.
+%% Nullable: institution.email, phone, address
+%% Nullable: user_profiles.employee_code, display_name
+%% Nullable: roles.description, permissions.description
+%% Nullable: teachers.user_id, last_name
+%% Nullable: students.middle_name, last_name, date_of_birth, gender
+%% Nullable: guardians.last_name, phone, email, relationship
+%% Nullable: attendance_records.remarks, audit_logs.entity_id, metadata
+%% Scalar logical references without declared FKs:
+%% user_profiles.user_id (potential admin users.id)
+%% teachers.user_id, attendance_sessions.created_by_user_id, audit_logs.actor_user_id
+%% attendance_sessions.academic_year_id, audit_logs.entity_id

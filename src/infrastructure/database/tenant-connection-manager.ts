@@ -4,7 +4,7 @@ import { PrismaClient as TenantPrismaClient } from "../../../node_modules/.prism
 import logger from "../../logs/Logger.js";
 
 export interface TenantConnectionInput {
-    tenantId: string;
+    tenantId: number;
     host?: string;
     port?: number;
     username?: string;
@@ -16,18 +16,16 @@ export interface TenantConnectionConfig extends Required<Pick<TenantConnectionIn
     url: string;
 }
 
-const sanitizeTenantId = (tenantId: string): string => {
-    const cleaned = tenantId.trim().replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-
-    if (!cleaned) {
-        throw new Error("tenantId is required");
+const sanitizeTenantId = (tenantId: number): number => {
+    if (!Number.isSafeInteger(tenantId) || tenantId <= 0) {
+        throw new Error("tenantId must be a positive integer");
     }
 
-    return cleaned;
+    return tenantId;
 };
 
 export const buildTenantDatabaseUrl = (
-    tenantId: string,
+    tenantId: number,
     overrides: Partial<Pick<TenantConnectionInput, "host" | "port" | "username" | "password" | "databaseName">> = {},
 ): string => {
     const safeTenantId = sanitizeTenantId(tenantId);

@@ -1,0 +1,44 @@
+erDiagram
+    user_profiles {
+        String id PK
+        String user_id UK
+        String employee_code
+        String display_name
+        UserStatus status
+        DateTime created_at
+        DateTime updated_at
+    }
+    roles {
+        String id PK
+        String name UK
+        String description
+        DateTime created_at
+        DateTime updated_at
+    }
+    permissions {
+        String id PK
+        String code UK
+        String description
+        DateTime created_at
+        DateTime updated_at
+    }
+    user_roles {
+        String id PK
+        String user_id FK
+        String role_id FK
+        DateTime created_at
+    }
+    role_permissions {
+        String role_id PK, FK
+        String permission_id PK, FK
+    }
+
+    user_profiles ||--o{ user_roles : "user_id"
+    roles ||--o{ user_roles : "role_id"
+    roles ||--o{ role_permissions : "role_id"
+    permissions ||--o{ role_permissions : "permission_id"
+
+%% UK constraint: user_profiles.user_id
+%% UK constraint: roles.name
+%% UK constraint: permissions.code
+%% UK constraint: user_roles(user_id, role_id)

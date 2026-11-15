@@ -32,6 +32,7 @@ export const authenticate = (
             userId: decoded.userId,
             email: decoded.email,
             tenantId: decoded.tenantId ?? undefined,
+            sid: decoded.sid,
             id: decoded.userId,
         };
 

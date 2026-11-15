@@ -28,26 +28,26 @@ import {
 
 describe("tenant connection manager", () => {
     it("builds a tenant database url from a tenant id", () => {
-        expect(buildTenantDatabaseUrl("tenant-123")).toContain("systra_tenant_tenant-123");
+        expect(buildTenantDatabaseUrl(123)).toContain("systra_tenant_123");
     });
 
     it("resolves admin and tenant database config from environment defaults", () => {
         const config = resolveTenantConnectionConfig({
-            tenantId: "tenant-123",
+            tenantId: 123,
             host: "localhost",
             port: 5432,
             username: "postgres",
             password: "postgres",
-            databaseName: "systra_tenant_tenant-123",
+            databaseName: "systra_tenant_123",
         });
 
-        expect(config.databaseName).toBe("systra_tenant_tenant-123");
-        expect(config.url).toContain("postgresql://postgres:postgres@localhost:5432/systra_tenant_tenant-123");
+        expect(config.databaseName).toBe("systra_tenant_123");
+        expect(config.url).toContain("postgresql://postgres:postgres@localhost:5432/systra_tenant_123");
     });
 });
 
 describe("TenantConnectionManager", () => {
-    const baseInput = (tenantId: string, overrides: Partial<Parameters<typeof tenantConnectionManager.getClient>[0]> = {}) => ({
+    const baseInput = (tenantId: number, overrides: Partial<Parameters<typeof tenantConnectionManager.getClient>[0]> = {}) => ({
         tenantId,
         host: "localhost",
         port: 5432,
@@ -70,24 +70,24 @@ describe("TenantConnectionManager", () => {
     });
 
     it("reuses the cached client for the same tenant and connection signature", () => {
-        const first = tenantConnectionManager.getClient(baseInput("tenant-a"));
-        const second = tenantConnectionManager.getClient(baseInput("tenant-a"));
+        const first = tenantConnectionManager.getClient(baseInput(1));
+        const second = tenantConnectionManager.getClient(baseInput(1));
 
         expect(second).toBe(first);
         expect(createdClients).toHaveLength(1);
     });
 
     it("creates distinct clients for distinct tenants", () => {
-        const clientA = tenantConnectionManager.getClient(baseInput("tenant-a"));
-        const clientB = tenantConnectionManager.getClient(baseInput("tenant-b"));
+        const clientA = tenantConnectionManager.getClient(baseInput(1));
+        const clientB = tenantConnectionManager.getClient(baseInput(2));
 
         expect(clientA).not.toBe(clientB);
         expect(createdClients).toHaveLength(2);
     });
 
     it("creates a new client when the connection signature changes for the same tenant", () => {
-        const original = tenantConnectionManager.getClient(baseInput("tenant-a", { password: "old-password" }));
-        const rotated = tenantConnectionManager.getClient(baseInput("tenant-a", { password: "new-password" }));
+        const original = tenantConnectionManager.getClient(baseInput(1, { password: "old-password" }));
+        const rotated = tenantConnectionManager.getClient(baseInput(1, { password: "new-password" }));
 
         expect(rotated).not.toBe(original);
         expect(createdClients).toHaveLength(2);
@@ -95,9 +95,9 @@ describe("TenantConnectionManager", () => {
 
     it("does not create a second client for concurrent same-tenant access within the same tick", () => {
         const results = [
-            tenantConnectionManager.getClient(baseInput("tenant-a")),
-            tenantConnectionManager.getClient(baseInput("tenant-a")),
-            tenantConnectionManager.getClient(baseInput("tenant-a")),
+            tenantConnectionManager.getClient(baseInput(1)),
+            tenantConnectionManager.getClient(baseInput(1)),
+            tenantConnectionManager.getClient(baseInput(1)),
         ];
 
         expect(new Set(results).size).toBe(1);
@@ -105,23 +105,23 @@ describe("TenantConnectionManager", () => {
     });
 
     it("evicts and disconnects a client that has been idle past the timeout", () => {
-        const client = tenantConnectionManager.getClient(baseInput("tenant-a"));
+        const client = tenantConnectionManager.getClient(baseInput(1));
 
         vi.setSystemTime(11 * 60 * 1000);
-        tenantConnectionManager.getClient(baseInput("tenant-b"));
+        tenantConnectionManager.getClient(baseInput(2));
 
         expect(tenantConnectionManager.size()).toBe(1);
         expect(client.$disconnect).toHaveBeenCalledTimes(1);
     });
 
     it("refreshes lastUsedAt on access so an actively used client is not evicted as idle", () => {
-        tenantConnectionManager.getClient(baseInput("tenant-a"));
+        tenantConnectionManager.getClient(baseInput(1));
 
         vi.setSystemTime(5 * 60 * 1000);
-        tenantConnectionManager.getClient(baseInput("tenant-a"));
+        tenantConnectionManager.getClient(baseInput(1));
 
         vi.setSystemTime(11 * 60 * 1000);
-        tenantConnectionManager.getClient(baseInput("tenant-a"));
+        tenantConnectionManager.getClient(baseInput(1));
 
         expect(createdClients).toHaveLength(1);
         expect(createdClients[0]?.$disconnect).not.toHaveBeenCalled();
@@ -130,21 +130,21 @@ describe("TenantConnectionManager", () => {
     it("evicts the least-recently-used client once the max active client cap is reached", () => {
         for (let i = 0; i < 10; i += 1) {
             vi.setSystemTime(i * 1000);
-            tenantConnectionManager.getClient(baseInput(`tenant-${i}`));
+            tenantConnectionManager.getClient(baseInput(100 + i));
         }
 
         expect(tenantConnectionManager.size()).toBe(10);
 
         vi.setSystemTime(10 * 1000);
-        tenantConnectionManager.getClient(baseInput("tenant-overflow"));
+        tenantConnectionManager.getClient(baseInput(999));
 
         expect(tenantConnectionManager.size()).toBe(10);
         expect(createdClients[0]?.$disconnect).toHaveBeenCalledTimes(1);
     });
 
     it("disconnectAll disconnects every cached client and empties the cache", async () => {
-        tenantConnectionManager.getClient(baseInput("tenant-a"));
-        tenantConnectionManager.getClient(baseInput("tenant-b"));
+        tenantConnectionManager.getClient(baseInput(1));
+        tenantConnectionManager.getClient(baseInput(2));
 
         await tenantConnectionManager.disconnectAll();
 
@@ -154,11 +154,11 @@ describe("TenantConnectionManager", () => {
     });
 
     it("does not throw when a cached client fails to disconnect during eviction", () => {
-        const client = tenantConnectionManager.getClient(baseInput("tenant-a"));
+        const client = tenantConnectionManager.getClient(baseInput(1));
         (client.$disconnect as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("connection already closed"));
 
         vi.setSystemTime(11 * 60 * 1000);
 
-        expect(() => tenantConnectionManager.getClient(baseInput("tenant-b"))).not.toThrow();
+        expect(() => tenantConnectionManager.getClient(baseInput(2))).not.toThrow();
     });
 });

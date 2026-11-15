@@ -5,12 +5,13 @@ export interface AuthenticatedRequestUser {
     id?: string;
     userId?: string;
     email?: string;
-    tenantId?: string | undefined;
+    tenantId?: number | undefined;
+    sid?: string | undefined;
 }
 
 export interface TenantContext {
     userId: string;
-    tenantId: string;
+    tenantId: number;
     membershipId: string;
 }
 

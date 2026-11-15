@@ -27,9 +27,9 @@ const parseDate = (value: unknown, field: string, required = false) => {
 };
 
 const sessionSelect = {
-    id: true, academicYearId: true, campusId: true, sectionId: true, attendanceDate: true,
+    id: true, academicYearId: true, sectionId: true, attendanceDate: true,
     status: true, createdByUserId: true, createdAt: true, updatedAt: true,
-    section: { select: { id: true, name: true, campusId: true, classId: true, class: { select: { id: true, name: true } } } },
+    section: { select: { id: true, name: true, classId: true, class: { select: { id: true, name: true } } } },
 };
 
 const sessionDetailSelect = {
@@ -44,35 +44,33 @@ const sessionDetailSelect = {
 };
 
 export class AttendanceService {
-    private async campusScope(tenantDb: any, actorUserId?: string) {
+    // undefined = whole Tenant; array = section ids a Teacher-only actor is assigned to.
+    private async sectionScope(tenantDb: any, actorUserId?: string) {
         if (!actorUserId) return undefined;
         const profile = await tenantDb.userProfile.findUnique({
             where: { userId: actorUserId },
-            select: { userRoles: { select: { campusId: true, role: { select: { name: true } } } } },
+            select: { userRoles: { select: { role: { select: { name: true } } } } },
         });
         if (!profile) throw new AppError("User profile not found in this tenant", 404, "NOT_FOUND");
-        if (profile.userRoles.some((assignment: any) => assignment.role?.name === "INSTITUTION_ADMIN")) return undefined;
-        const campusIds = profile.userRoles
-            .filter((assignment: any) => assignment.role?.name === "CAMPUS_ADMIN" || assignment.role?.name === "TEACHER")
-            .map((assignment: any) => assignment.campusId)
-            .filter(Boolean);
-        return campusIds.length ? campusIds : ["__no_campus_access__"];
+        const names = profile.userRoles.map((assignment: any) => assignment.role?.name);
+        if (names.includes("INSTITUTION_ADMIN") || names.includes("CAMPUS_ADMIN")) return undefined;
+        const teacher = await tenantDb.teacher.findUnique({ where: { userId: actorUserId }, select: { id: true, status: true } });
+        if (!teacher || teacher.status !== "ACTIVE") return [];
+        const assignments = await tenantDb.teacherAssignment.findMany({ where: { teacherId: teacher.id }, select: { sectionId: true } });
+        return assignments.map((assignment: any) => assignment.sectionId) as string[];
     }
 
-    // Enforces that the actor is active, campus-scoped, and (for teachers) assigned to the section.
-    private async assertSectionAccess(tenantDb: any, actorUserId: string, section: { id: string; campusId: string }) {
+    // Enforces that the actor is an admin of this Tenant or, for teachers, assigned to the section.
+    private async assertSectionAccess(tenantDb: any, actorUserId: string, section: { id: string }) {
         const profile = await tenantDb.userProfile.findUnique({
             where: { userId: actorUserId },
-            select: { userRoles: { select: { campusId: true, role: { select: { name: true } } } } },
+            select: { userRoles: { select: { role: { select: { name: true } } } } },
         });
         if (!profile) throw new AppError("User profile not found in this tenant", 404, "NOT_FOUND");
-        const roles = profile.userRoles as Array<{ campusId: string | null; role?: { name?: string } }>;
-        if (roles.some((assignment) => assignment.role?.name === "INSTITUTION_ADMIN")) return;
-        const campusMatch = roles.some((assignment) => assignment.campusId === section.campusId
-            && (assignment.role?.name === "CAMPUS_ADMIN" || assignment.role?.name === "TEACHER"));
-        if (!campusMatch) throw new AppError("You are not authorized for this section", 403, "FORBIDDEN");
+        const roles = profile.userRoles as Array<{ role?: { name?: string } }>;
+        if (roles.some((assignment) => assignment.role?.name === "INSTITUTION_ADMIN" || assignment.role?.name === "CAMPUS_ADMIN")) return;
         const isTeacher = roles.some((assignment) => assignment.role?.name === "TEACHER");
-        if (!isTeacher) return;
+        if (!isTeacher) throw new AppError("You are not authorized for this section", 403, "FORBIDDEN");
         const teacher = await tenantDb.teacher.findUnique({ where: { userId: actorUserId }, select: { id: true, status: true } });
         if (!teacher || teacher.status !== "ACTIVE") throw new AppError("Teacher profile is inactive or not found", 403, "FORBIDDEN");
         const assignment = await tenantDb.teacherAssignment.findFirst({ where: { teacherId: teacher.id, sectionId: section.id }, select: { id: true } });
@@ -82,10 +80,10 @@ export class AttendanceService {
     async listSessions(tenantDb: any, actorUserId: string, options: { page?: number; pageSize?: number; sectionId?: string; date?: string } = {}) {
         const page = Math.max(Number(options.page ?? 1), 1);
         const pageSize = Math.min(Math.max(Number(options.pageSize ?? 20), 1), 100);
-        const campusIds = await this.campusScope(tenantDb, actorUserId);
+        const sectionIds = await this.sectionScope(tenantDb, actorUserId);
         const where: any = {};
-        if (campusIds) where.campusId = { in: campusIds };
-        if (typeof options.sectionId === "string" && options.sectionId.trim()) where.sectionId = options.sectionId.trim();
+        if (sectionIds) where.sectionId = { in: sectionIds };
+        if (typeof options.sectionId === "string" && options.sectionId.trim()) where.sectionId = sectionIds ? { in: sectionIds.filter((id) => id === options.sectionId!.trim()) } : options.sectionId.trim();
         if (typeof options.date === "string" && options.date.trim()) where.attendanceDate = parseDate(options.date, "Date", true);
         const [total, items] = await Promise.all([
             tenantDb.attendanceSession.count({ where }),
@@ -97,22 +95,22 @@ export class AttendanceService {
     async getSession(tenantDb: any, actorUserId: string, sessionId: string) {
         const session = await tenantDb.attendanceSession.findUnique({ where: { id: sessionId }, select: sessionDetailSelect });
         if (!session) throw new AppError("Attendance session not found in this tenant", 404, "NOT_FOUND");
-        const campusIds = await this.campusScope(tenantDb, actorUserId);
-        if (campusIds && !campusIds.includes(session.campusId)) throw new AppError("Attendance session access denied", 403, "FORBIDDEN");
+        const sectionIds = await this.sectionScope(tenantDb, actorUserId);
+        if (sectionIds && !sectionIds.includes(session.sectionId)) throw new AppError("Attendance session access denied", 403, "FORBIDDEN");
         return session;
     }
 
     async createSession(tenantDb: any, actorUserId: string, input: Record<string, unknown>) {
         const sectionId = text(input.sectionId, "Section id", 100, true)!;
         const attendanceDate = parseDate(input.attendanceDate, "Attendance date", true)!;
-        const section = await tenantDb.section.findUnique({ where: { id: sectionId }, select: { id: true, campusId: true, academicYearId: true } });
+        const section = await tenantDb.section.findUnique({ where: { id: sectionId }, select: { id: true, academicYearId: true } });
         if (!section) throw new AppError("Section not found in this tenant", 404, "NOT_FOUND");
         await this.assertSectionAccess(tenantDb, actorUserId, section);
         if (await tenantDb.attendanceSession.findUnique({ where: { sectionId_attendanceDate: { sectionId, attendanceDate } }, select: { id: true } })) {
             throw new AppError("An attendance session already exists for this section and date", 409, "DUPLICATE_RESOURCE");
         }
         const session = await tenantDb.attendanceSession.create({
-            data: { sectionId, campusId: section.campusId, academicYearId: section.academicYearId, attendanceDate, createdByUserId: actorUserId },
+            data: { sectionId, academicYearId: section.academicYearId, attendanceDate, createdByUserId: actorUserId },
             select: sessionSelect,
         });
         await tenantDb.auditLog.create({ data: { actorUserId, action: "attendance.created", entityType: "attendance_session", entityId: session.id, metadata: { sessionId: session.id, sectionId, attendanceDate } as Prisma.InputJsonValue } });
@@ -123,10 +121,10 @@ export class AttendanceService {
         const rawRecords = Array.isArray(input.records) ? input.records : undefined;
         if (!rawRecords || !rawRecords.length) throw new AppError("At least one attendance record is required", 400, "VALIDATION_ERROR");
 
-        const session = await tenantDb.attendanceSession.findUnique({ where: { id: sessionId }, select: { id: true, sectionId: true, campusId: true, status: true } });
+        const session = await tenantDb.attendanceSession.findUnique({ where: { id: sessionId }, select: { id: true, sectionId: true, status: true } });
         if (!session) throw new AppError("Attendance session not found in this tenant", 404, "NOT_FOUND");
         if (session.status !== "DRAFT") throw new AppError("Attendance records can only be added while the session is in DRAFT status", 409, "INVALID_STATE");
-        await this.assertSectionAccess(tenantDb, actorUserId, { id: session.sectionId, campusId: session.campusId });
+        await this.assertSectionAccess(tenantDb, actorUserId, { id: session.sectionId });
 
         const seen = new Set<string>();
         const parsed = rawRecords.map((record: any, index: number) => {
@@ -155,10 +153,10 @@ export class AttendanceService {
     }
 
     async submitSession(tenantDb: any, actorUserId: string, sessionId: string) {
-        const session = await tenantDb.attendanceSession.findUnique({ where: { id: sessionId }, select: { id: true, sectionId: true, campusId: true, status: true } });
+        const session = await tenantDb.attendanceSession.findUnique({ where: { id: sessionId }, select: { id: true, sectionId: true, status: true } });
         if (!session) throw new AppError("Attendance session not found in this tenant", 404, "NOT_FOUND");
         if (session.status !== "DRAFT") throw new AppError("Attendance session has already been submitted", 409, "INVALID_STATE");
-        await this.assertSectionAccess(tenantDb, actorUserId, { id: session.sectionId, campusId: session.campusId });
+        await this.assertSectionAccess(tenantDb, actorUserId, { id: session.sectionId });
         await tenantDb.attendanceSession.update({ where: { id: sessionId }, data: { status: "SUBMITTED" } });
         await tenantDb.auditLog.create({ data: { actorUserId, action: "attendance.submitted", entityType: "attendance_session", entityId: sessionId, metadata: { sessionId } as Prisma.InputJsonValue } });
         return this.getSession(tenantDb, actorUserId, sessionId);
