@@ -292,7 +292,7 @@ describe("Phase 6 user management", () => {
         const response = await request(app)
             .get("/api/users")
             .query({ status: "INACTIVE" })
-            .set("Authorization", `******;
+            .set("Authorization",`Bearer ${token}`);
 
         expect(response.status).toBe(200);
         expect(response.body.data).toHaveLength(1);
@@ -317,7 +317,7 @@ describe("Phase 6 user management", () => {
         });
         const response = await request(app)
             .post("/api/users/user-2/activate")
-            .set("Authorization", `******;
+            .set("Authorization", `Bearer ${token}`);
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
@@ -436,6 +436,7 @@ describe("Phase 6 user management", () => {
             email: "user@example.com",
             tenantId: 1,
         });
+295
 
         const response = await request(app)
             .post("/api/users")
